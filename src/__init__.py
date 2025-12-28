@@ -21,10 +21,19 @@ from src.markdown_loader import (
 )
 from src.document_indexer import (
     IndexResult,
-    create_elasticsearch_store,
     create_record_manager,
     index_documents,
     index_documents_from_file,
+)
+from src.volcengine_embedding import (
+    VolcengineEmbeddingClient,
+    get_embedding_client,
+)
+from src.hybrid_search import (
+    SearchResult,
+    hybrid_search,
+    search_documents,
+    get_context_for_rag,
 )
 
 __all__ = [
@@ -41,8 +50,15 @@ __all__ = [
     "split_markdown_text",
     # Document indexer
     "IndexResult",
-    "create_elasticsearch_store",
     "create_record_manager",
     "index_documents",
     "index_documents_from_file",
+    # Volcengine embedding
+    "VolcengineEmbeddingClient",
+    "get_embedding_client",
+    # Hybrid search
+    "SearchResult",
+    "hybrid_search",
+    "search_documents",
+    "get_context_for_rag",
 ]

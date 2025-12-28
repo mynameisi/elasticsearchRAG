@@ -2,24 +2,23 @@
 Document Indexer Module
 
 This module provides functions to index documents into Elasticsearch
-with deduplication support using LangChain's SQLRecordManager and ElasticsearchStore.
+with deduplication support using LangChain's SQLRecordManager.
 
 Requirements:
 - 4.2: Compute hash values for deduplication using SQLRecordManager
-- 4.3: Use ElasticsearchStore with SparseVectorStrategy
+- 4.3: Index documents into Elasticsearch with semantic_text support
 - 4.4: Support cleanup="full" mode for consistency
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
+import hashlib
 
 from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 from langchain_core.documents import Document
-from langchain_core.indexing import index
-from langchain_core.indexing.api import IndexingResult
-from langchain_elasticsearch import ElasticsearchStore, SparseVectorStrategy
-from langchain_community.indexes import SQLRecordManager
+from langchain_classic.indexes import SQLRecordManager
 
 
 @dataclass
@@ -56,28 +55,12 @@ def create_record_manager(
     return record_manager
 
 
-def create_elasticsearch_store(
-    es_client: Elasticsearch,
-    index_name: str,
-    query_field: str = "content",
-) -> ElasticsearchStore:
-    """
-    Create an ElasticsearchStore with SparseVectorStrategy.
-    
-    Args:
-        es_client: Elasticsearch client instance
-        index_name: Name of the Elasticsearch index
-        query_field: Field name for text content (default: "content")
-        
-    Returns:
-        Configured ElasticsearchStore instance
-    """
-    return ElasticsearchStore(
-        es_connection=es_client,
-        index_name=index_name,
-        query_field=query_field,
-        strategy=SparseVectorStrategy(),
-    )
+def _compute_doc_id(doc: Document) -> str:
+    """Compute a unique ID for a document based on its content and metadata."""
+    content = doc.page_content
+    metadata_str = str(sorted(doc.metadata.items()))
+    combined = f"{content}:{metadata_str}"
+    return hashlib.sha256(combined.encode()).hexdigest()
 
 
 def index_documents(
@@ -87,12 +70,13 @@ def index_documents(
     record_manager_db_url: str = "sqlite:///record_manager.db",
     cleanup: Literal["incremental", "full", None] = "full",
     source_id_key: Optional[str] = None,
+    embedding_client: Optional[Any] = None,
 ) -> IndexResult:
     """
-    Index documents into Elasticsearch with deduplication.
+    Index documents into Elasticsearch with deduplication and optional embeddings.
     
     This function uses SQLRecordManager for hash-based deduplication
-    and ElasticsearchStore with SparseVectorStrategy for storage.
+    and directly indexes into Elasticsearch using bulk API.
     
     Args:
         documents: List of Document objects to index
@@ -104,6 +88,7 @@ def index_documents(
             - "full": Delete all documents not in the current batch
             - None: No cleanup, only add new documents
         source_id_key: Optional metadata key to use as source ID
+        embedding_client: Optional embedding client (e.g., VolcengineEmbeddingClient)
         
     Returns:
         IndexResult with counts of added, updated, skipped, and deleted documents
@@ -117,26 +102,96 @@ def index_documents(
         db_url=record_manager_db_url,
     )
     
-    # Create Elasticsearch store
-    vector_store = create_elasticsearch_store(
-        es_client=es_client,
-        index_name=index_name,
-    )
+    # Prepare documents for indexing
+    docs_to_index = []
+    doc_ids = []
+    num_skipped = 0
     
-    # Index documents with deduplication
-    result: IndexingResult = index(
-        docs_source=documents,
-        record_manager=record_manager,
-        vector_store=vector_store,
-        cleanup=cleanup,
-        source_id_key=source_id_key,
-    )
+    for doc in documents:
+        doc_id = _compute_doc_id(doc)
+        doc_ids.append(doc_id)
+        
+        # Check if document already exists in record manager
+        existing = record_manager.exists([doc_id])
+        if existing and existing[0]:
+            num_skipped += 1
+            continue
+        
+        docs_to_index.append((doc_id, doc))
+    
+    num_added = 0
+    
+    # Generate embeddings if client is provided
+    if docs_to_index and embedding_client:
+        print(f"Generating embeddings for {len(docs_to_index)} documents...")
+        texts = [doc.page_content for _, doc in docs_to_index]
+        embeddings = embedding_client.embed_documents(texts)
+        
+        # Index documents with embeddings
+        for i, (doc_id, doc) in enumerate(docs_to_index):
+            try:
+                es_doc = {
+                    "content": doc.page_content,
+                    "embedding": embeddings[i],
+                    **doc.metadata
+                }
+                es_client.index(
+                    index=index_name,
+                    id=doc_id,
+                    document=es_doc,
+                    refresh=False
+                )
+                num_added += 1
+            except Exception as e:
+                print(f"  Error indexing document: {e}")
+    elif docs_to_index:
+        # Index without embeddings
+        for doc_id, doc in docs_to_index:
+            try:
+                es_doc = {
+                    "content": doc.page_content,
+                    **doc.metadata
+                }
+                es_client.index(
+                    index=index_name,
+                    id=doc_id,
+                    document=es_doc,
+                    refresh=False
+                )
+                num_added += 1
+            except Exception as e:
+                print(f"  Error indexing document: {e}")
+    
+    if docs_to_index:
+        # Refresh the index
+        es_client.indices.refresh(index=index_name)
+    
+    # Update record manager
+    if doc_ids:
+        record_manager.update(doc_ids)
+    
+    # Handle cleanup
+    num_deleted = 0
+    if cleanup == "full":
+        # Get all doc IDs from record manager
+        all_doc_ids = record_manager.list_keys()
+        # Delete documents not in current batch
+        to_delete = set(all_doc_ids) - set(doc_ids)
+        if to_delete:
+            for doc_id in to_delete:
+                try:
+                    es_client.delete(index=index_name, id=doc_id, ignore=[404])
+                    num_deleted += 1
+                except Exception:
+                    pass
+            # Clean up record manager
+            record_manager.delete_keys(list(to_delete))
     
     return IndexResult(
-        num_added=result.get("num_added", 0),
-        num_updated=result.get("num_updated", 0),
-        num_skipped=result.get("num_skipped", 0),
-        num_deleted=result.get("num_deleted", 0),
+        num_added=num_added,
+        num_updated=0,
+        num_skipped=num_skipped,
+        num_deleted=num_deleted,
     )
 
 

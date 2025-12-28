@@ -1,0 +1,126 @@
+# Higress AI Search Plugin Configuration
+# This configuration enables RAG capabilities by connecting to Elasticsearch
+# for document retrieval before sending queries to the LLM.
+
+# =============================================================================
+# AI Search Plugin Configuration
+# =============================================================================
+# The ai-search plugin retrieves relevant documents from Elasticsearch
+# and augments the LLM prompt with context from the knowledge base.
+
+searchFrom:
+  - type: "elasticsearch"
+    # Service name registered in Higress service discovery
+    # For local development, use the Docker network service name
+    serviceName: "elasticsearch.static"
+    # Elasticsearch authentication credentials
+    username: "elastic"
+    password: "test123"
+    # Index containing the knowledge base documents
+    index: "rag-knowledge-base"
+    # Field containing the text content for retrieval
+    contentField: "content"
+    # Field containing semantic embeddings for vector search
+    semanticTextField: "semantic_text"
+
+# =============================================================================
+# LLM Provider Configuration
+# =============================================================================
+# Configure the LLM provider for generating responses.
+# Higress supports multiple providers including OpenAI, Qwen, and others.
+
+provider:
+  # Provider type: openai, qwen, azure-openai, etc.
+  type: "qwen"
+  # API endpoint for the LLM provider
+  # For Qwen/通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1
+  apiEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  # Model to use for generation
+  modelName: "qwen-turbo"
+  # API key (use environment variable in production)
+  apiKey: "${DASHSCOPE_API_KEY}"
+
+# =============================================================================
+# RAG Prompt Template
+# =============================================================================
+# Template for constructing the prompt with retrieved context.
+# The {context} placeholder will be replaced with retrieved documents.
+# The {question} placeholder will be replaced with the user's query.
+
+promptTemplate: |
+  You are a helpful assistant that answers questions based on the provided context.
+  Use the following context to answer the user's question.
+  If the answer cannot be found in the context, say "I don't have enough information to answer that question."
+  
+  Context:
+  {context}
+  
+  Question: {question}
+  
+  Answer:
+
+# =============================================================================
+# Search Configuration
+# =============================================================================
+# Configure how documents are retrieved from Elasticsearch.
+
+searchConfig:
+  # Maximum number of documents to retrieve
+  topK: 3
+  # Minimum relevance score threshold (0.0 to 1.0)
+  minScore: 0.5
+  # Enable hybrid search (combines semantic and full-text search)
+  hybridSearch: true
+
+# =============================================================================
+# Higress Route Configuration Example
+# =============================================================================
+# Example route configuration for enabling the ai-search plugin on a route.
+# This would be configured in Higress console or via CRD.
+#
+# apiVersion: networking.higress.io/v1
+# kind: Ingress
+# metadata:
+#   name: rag-api
+#   annotations:
+#     higress.io/plugins: |
+#       - name: ai-search
+#         config:
+#           searchFrom:
+#             - type: elasticsearch
+#               serviceName: elasticsearch.static
+#               username: elastic
+#               password: test123
+#               index: rag-knowledge-base
+#               contentField: content
+#               semanticTextField: semantic_text
+# spec:
+#   rules:
+#     - host: api.example.com
+#       http:
+#         paths:
+#           - path: /v1/chat/completions
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: llm-provider
+#                 port:
+#                   number: 80
+
+# =============================================================================
+# Service Registration Example
+# =============================================================================
+# Register Elasticsearch as a static service in Higress.
+# This can be done via Higress console or McpBridge CRD.
+#
+# apiVersion: networking.higress.io/v1
+# kind: McpBridge
+# metadata:
+#   name: elasticsearch-service
+# spec:
+#   registries:
+#     - name: elasticsearch
+#       type: static
+#       domain: elasticsearch
+#       port: 9200
+#       protocol: https
