@@ -306,6 +306,47 @@ async def health():
     }
 
 
+@app.get("/api/document")
+async def get_document(
+    source: str = Query(..., description="Source file path"),
+):
+    """
+    Get full document content by source path.
+    """
+    from pathlib import Path
+    
+    try:
+        # Security: only allow files within current directory
+        file_path = Path(source)
+        
+        # Try to resolve relative to current working directory
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / file_path
+        
+        # Check if file exists and is a markdown file
+        if not file_path.exists():
+            # Try just the filename in current directory
+            file_path = Path.cwd() / file_path.name
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        if file_path.suffix.lower() not in ['.md', '.markdown', '.txt']:
+            raise HTTPException(status_code=400, detail="Only markdown files supported")
+        
+        content = file_path.read_text(encoding='utf-8')
+        
+        return {
+            "source": str(source),
+            "content": content,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
+
+
 # Serve static files
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 

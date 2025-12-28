@@ -5,67 +5,89 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG Search</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <h1 class="logo">🔍 RAG Search</h1>
-            <p class="tagline">Hybrid semantic + full-text search</p>
-        </header>
+    <div class="app-container">
+        <div class="search-panel" id="search-panel">
+            <header class="header">
+                <h1 class="logo">🔍 RAG Search</h1>
+                <p class="tagline">Hybrid semantic + full-text search</p>
+            </header>
 
-        <main class="main">
-            <form id="search-form" class="search-form">
-                <div class="search-input-wrapper">
-                    <input 
-                        type="text" 
-                        id="search-input" 
-                        class="search-input" 
-                        placeholder="Search documents..."
-                        autocomplete="off"
-                        autofocus
-                    >
-                    <button type="submit" class="search-button">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"></circle>
-                            <path d="m21 21-4.35-4.35"></path>
-                        </svg>
-                    </button>
+            <main class="main">
+                <form id="search-form" class="search-form">
+                    <div class="search-input-wrapper">
+                        <input 
+                            type="text" 
+                            id="search-input" 
+                            class="search-input" 
+                            placeholder="Search documents..."
+                            autocomplete="off"
+                            autofocus
+                        >
+                        <button type="submit" class="search-button">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="search-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="hybrid-toggle" checked>
+                            <span class="checkbox-custom"></span>
+                            Enable hybrid search (semantic + keyword)
+                        </label>
+                    </div>
+                </form>
+
+                <div id="status" class="status"></div>
+
+                <div id="results-container" class="results-container">
+                    <div id="results-header" class="results-header hidden">
+                        <span id="results-count"></span>
+                        <span id="search-type" class="search-type-badge"></span>
+                    </div>
+                    <div id="results" class="results"></div>
                 </div>
-                <div class="search-options">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="hybrid-toggle" checked>
-                        <span class="checkbox-custom"></span>
-                        Enable hybrid search (semantic + keyword)
-                    </label>
+
+                <div id="empty-state" class="empty-state">
+                    <div class="empty-icon">📚</div>
+                    <p>Enter a query to search your knowledge base</p>
                 </div>
-            </form>
 
-            <div id="status" class="status"></div>
-
-            <div id="results-container" class="results-container">
-                <div id="results-header" class="results-header hidden">
-                    <span id="results-count"></span>
-                    <span id="search-type" class="search-type-badge"></span>
+                <div id="loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Searching...</p>
                 </div>
-                <div id="results" class="results"></div>
+
+                <div id="error" class="error hidden"></div>
+            </main>
+
+            <footer class="footer">
+                <p>Powered by Elasticsearch + Volcengine Embeddings</p>
+            </footer>
+        </div>
+
+        <!-- Article Side Panel -->
+        <div class="article-panel" id="article-panel">
+            <div class="article-header">
+                <h2 class="article-title" id="article-title">Document</h2>
+                <button class="close-button" id="close-panel" aria-label="Close panel">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"></path>
+                    </svg>
+                </button>
             </div>
-
-            <div id="empty-state" class="empty-state">
-                <div class="empty-icon">📚</div>
-                <p>Enter a query to search your knowledge base</p>
+            <div class="article-content" id="article-content">
+                <!-- Rendered markdown will appear here -->
             </div>
+        </div>
 
-            <div id="loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Searching...</p>
-            </div>
-
-            <div id="error" class="error hidden"></div>
-        </main>
-
-        <footer class="footer">
-            <p>Powered by Elasticsearch + Volcengine Embeddings</p>
-        </footer>
+        <!-- Overlay for mobile -->
+        <div class="panel-overlay" id="panel-overlay"></div>
     </div>
 
     <script src="/static/app.js"></script>

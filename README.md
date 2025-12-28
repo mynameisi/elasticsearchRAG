@@ -211,9 +211,11 @@ Then open http://127.0.0.1:8000 in your browser.
 ### Features
 
 - **Hybrid Search Toggle**: Switch between hybrid (semantic + keyword) and full-text only search
-- **Highlighted Results**: Matching terms are highlighted in yellow
+- **Highlighted Results**: Matching terms are highlighted in yellow in search snippets
 - **Normalized Relevance Scores**: Scores displayed as 0-100 (top result = 100)
-- **Expandable Content**: Click to view full document content
+- **Document Side Panel**: Click any result to open full document with markdown rendering
+- **Search Term Highlighting**: All search terms highlighted throughout the document
+- **Auto-scroll to Match**: Panel automatically scrolls to the matching paragraph
 - **Health Status**: Shows Elasticsearch and embedding service connectivity
 
 ### Server Options

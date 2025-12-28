@@ -12,8 +12,21 @@ const loading = document.getElementById('loading');
 const errorDiv = document.getElementById('error');
 const statusDiv = document.getElementById('status');
 
+// Article Panel Elements
+const appContainer = document.querySelector('.app-container');
+const articlePanel = document.getElementById('article-panel');
+const articleTitle = document.getElementById('article-title');
+const articleContent = document.getElementById('article-content');
+const closePanel = document.getElementById('close-panel');
+const panelOverlay = document.getElementById('panel-overlay');
+
 // API base URL
 const API_BASE = '/api';
+
+// Store current results and full documents
+let currentResults = [];
+let documentCache = {};
+let currentSearchQuery = '';
 
 // Check health on load
 async function checkHealth() {
@@ -50,6 +63,9 @@ async function checkHealth() {
 async function performSearch(query) {
     if (!query.trim()) return;
     
+    // Close panel if open
+    closeSidePanel();
+    
     // Show loading
     emptyState.classList.add('hidden');
     resultsHeader.classList.add('hidden');
@@ -69,6 +85,8 @@ async function performSearch(query) {
         }
         
         const data = await response.json();
+        currentResults = data.results;
+        currentSearchQuery = query;
         displayResults(data);
         
     } catch (e) {
@@ -105,13 +123,9 @@ function displayResults(data) {
     // Render results
     resultsDiv.innerHTML = normalizedResults.map((result, index) => createResultCard(result, index)).join('');
     
-    // Add expand listeners
-    document.querySelectorAll('.expand-button').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const content = btn.parentElement.querySelector('.full-content');
-            const isExpanded = content.classList.toggle('expanded');
-            btn.textContent = isExpanded ? '▲ Show less' : '▼ Show full content';
-        });
+    // Add click listeners to result cards
+    document.querySelectorAll('.result-card').forEach((card, index) => {
+        card.addEventListener('click', () => openArticlePanel(index));
     });
 }
 
@@ -133,19 +147,230 @@ function createResultCard(result, index) {
         : '';
     
     return `
-        <article class="result-card">
+        <article class="result-card" data-index="${index}">
             <h3 class="result-title">${escapeHtml(result.title)}</h3>
             <p class="result-snippet">${snippet}</p>
             <div class="result-meta">
                 ${metaTags}
                 ${scoreDisplay}
-            </div>
-            <div class="result-expand">
-                <button class="expand-button">▼ Show full content</button>
-                <div class="full-content">${escapeHtml(result.content)}</div>
+                <span class="result-arrow">→</span>
             </div>
         </article>
     `;
+}
+
+// Open article side panel
+async function openArticlePanel(index) {
+    const result = currentResults[index];
+    if (!result) return;
+    
+    // Mark active card
+    document.querySelectorAll('.result-card').forEach((card, i) => {
+        card.classList.toggle('active', i === index);
+    });
+    
+    // Set title
+    articleTitle.textContent = result.title;
+    
+    // Get full document content
+    const fullContent = await getFullDocument(result);
+    
+    // Render markdown
+    const renderedHtml = renderMarkdownWithHighlight(fullContent, result.content);
+    articleContent.innerHTML = renderedHtml;
+    
+    // Open panel
+    articlePanel.classList.add('open');
+    appContainer.classList.add('panel-open');
+    panelOverlay.classList.add('visible');
+    
+    // Scroll to highlighted section after a brief delay
+    setTimeout(() => {
+        const highlightedSection = articleContent.querySelector('.highlight-section');
+        if (highlightedSection) {
+            highlightedSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 100);
+}
+
+// Get full document (fetch from source or use cached)
+async function getFullDocument(result) {
+    const source = result.metadata.source;
+    
+    // If we have the source path, try to fetch full document
+    if (source && !documentCache[source]) {
+        try {
+            const response = await fetch(`${API_BASE}/document?source=${encodeURIComponent(source)}`);
+            if (response.ok) {
+                const data = await response.json();
+                documentCache[source] = data.content;
+            }
+        } catch (e) {
+            console.log('Could not fetch full document, using result content');
+        }
+    }
+    
+    // Return cached full document or fall back to result content
+    return documentCache[source] || result.content;
+}
+
+// Render markdown with highlighted section
+function renderMarkdownWithHighlight(fullContent, matchContent) {
+    // Configure marked
+    marked.setOptions({
+        breaks: true,
+        gfm: true,
+    });
+    
+    // Find the matching section in the full content
+    const normalizedMatch = normalizeText(matchContent);
+    
+    // Split content into sections by headers
+    const sections = splitByHeaders(fullContent);
+    
+    // Find which section contains the match
+    let matchedSectionIndex = -1;
+    for (let i = 0; i < sections.length; i++) {
+        if (normalizeText(sections[i]).includes(normalizedMatch)) {
+            matchedSectionIndex = i;
+            break;
+        }
+    }
+    
+    // If no exact match found, try fuzzy matching
+    if (matchedSectionIndex === -1) {
+        const matchWords = normalizedMatch.split(/\s+/).filter(w => w.length > 3);
+        let bestScore = 0;
+        
+        for (let i = 0; i < sections.length; i++) {
+            const sectionNorm = normalizeText(sections[i]);
+            const score = matchWords.filter(w => sectionNorm.includes(w)).length;
+            if (score > bestScore) {
+                bestScore = score;
+                matchedSectionIndex = i;
+            }
+        }
+    }
+    
+    // Render each section, wrapping the matched one
+    let html = '';
+    for (let i = 0; i < sections.length; i++) {
+        let sectionHtml = marked.parse(sections[i]);
+        
+        // Highlight search terms in all sections
+        sectionHtml = highlightSearchTerms(sectionHtml, currentSearchQuery);
+        
+        if (i === matchedSectionIndex) {
+            html += `<div class="highlight-section">${sectionHtml}</div>`;
+        } else {
+            html += sectionHtml;
+        }
+    }
+    
+    return html || highlightSearchTerms(marked.parse(fullContent), currentSearchQuery);
+}
+
+// Highlight search terms in HTML content
+function highlightSearchTerms(html, query) {
+    if (!query) return html;
+    
+    // Extract search terms (split by spaces, filter short words)
+    const terms = query.toLowerCase().split(/\s+/).filter(term => term.length >= 2);
+    
+    if (terms.length === 0) return html;
+    
+    // Create a temporary element to work with the HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    // Walk through text nodes and highlight matches
+    highlightTextNodes(temp, terms);
+    
+    return temp.innerHTML;
+}
+
+// Recursively highlight text nodes
+function highlightTextNodes(element, terms) {
+    const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+    );
+    
+    const textNodes = [];
+    while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+    }
+    
+    for (const textNode of textNodes) {
+        // Skip if parent is already a mark, script, or style
+        const parentTag = textNode.parentNode.tagName?.toLowerCase();
+        if (parentTag === 'mark' || parentTag === 'script' || parentTag === 'style' || parentTag === 'code') {
+            continue;
+        }
+        
+        const text = textNode.textContent;
+        const highlighted = highlightTermsInText(text, terms);
+        
+        if (highlighted !== text) {
+            const span = document.createElement('span');
+            span.innerHTML = highlighted;
+            textNode.parentNode.replaceChild(span, textNode);
+        }
+    }
+}
+
+// Highlight terms in a text string
+function highlightTermsInText(text, terms) {
+    if (!text.trim()) return text;
+    
+    // Build regex pattern for all terms
+    const escapedTerms = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const pattern = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+    
+    return text.replace(pattern, '<mark class="search-highlight">$1</mark>');
+}
+
+// Split markdown content by headers
+function splitByHeaders(content) {
+    const lines = content.split('\n');
+    const sections = [];
+    let currentSection = [];
+    
+    for (const line of lines) {
+        // Check if line is a header (starts with #)
+        if (/^#{1,6}\s/.test(line) && currentSection.length > 0) {
+            sections.push(currentSection.join('\n'));
+            currentSection = [line];
+        } else {
+            currentSection.push(line);
+        }
+    }
+    
+    // Don't forget the last section
+    if (currentSection.length > 0) {
+        sections.push(currentSection.join('\n'));
+    }
+    
+    return sections;
+}
+
+// Normalize text for comparison
+function normalizeText(text) {
+    return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Close side panel
+function closeSidePanel() {
+    articlePanel.classList.remove('open');
+    appContainer.classList.remove('panel-open');
+    panelOverlay.classList.remove('visible');
+    
+    // Remove active state from cards
+    document.querySelectorAll('.result-card').forEach(card => {
+        card.classList.remove('active');
+    });
 }
 
 // Escape HTML to prevent XSS
@@ -161,16 +386,15 @@ searchForm.addEventListener('submit', (e) => {
     performSearch(searchInput.value);
 });
 
-// Debounced search on input (optional - uncomment for live search)
-// let debounceTimer;
-// searchInput.addEventListener('input', (e) => {
-//     clearTimeout(debounceTimer);
-//     debounceTimer = setTimeout(() => {
-//         if (e.target.value.length >= 2) {
-//             performSearch(e.target.value);
-//         }
-//     }, 300);
-// });
+closePanel.addEventListener('click', closeSidePanel);
+panelOverlay.addEventListener('click', closeSidePanel);
+
+// Close panel on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && articlePanel.classList.contains('open')) {
+        closeSidePanel();
+    }
+});
 
 // Initialize
 checkHealth();
