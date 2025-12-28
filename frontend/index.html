@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Search</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="logo">🔍 RAG Search</h1>
+            <p class="tagline">Hybrid semantic + full-text search</p>
+        </header>
+
+        <main class="main">
+            <form id="search-form" class="search-form">
+                <div class="search-input-wrapper">
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        class="search-input" 
+                        placeholder="Search documents..."
+                        autocomplete="off"
+                        autofocus
+                    >
+                    <button type="submit" class="search-button">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="search-options">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="hybrid-toggle" checked>
+                        <span class="checkbox-custom"></span>
+                        Enable hybrid search (semantic + keyword)
+                    </label>
+                </div>
+            </form>
+
+            <div id="status" class="status"></div>
+
+            <div id="results-container" class="results-container">
+                <div id="results-header" class="results-header hidden">
+                    <span id="results-count"></span>
+                    <span id="search-type" class="search-type-badge"></span>
+                </div>
+                <div id="results" class="results"></div>
+            </div>
+
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon">📚</div>
+                <p>Enter a query to search your knowledge base</p>
+            </div>
+
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Searching...</p>
+            </div>
+
+            <div id="error" class="error hidden"></div>
+        </main>
+
+        <footer class="footer">
+            <p>Powered by Elasticsearch + Volcengine Embeddings</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

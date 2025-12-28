@@ -196,6 +196,38 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+## Web Search Interface
+
+A professional search frontend is included for interactive document search.
+
+### Start the Search Server
+
+```bash
+uv run python run_search_server.py
+```
+
+Then open http://127.0.0.1:8000 in your browser.
+
+### Features
+
+- **Hybrid Search Toggle**: Switch between hybrid (semantic + keyword) and full-text only search
+- **Highlighted Results**: Matching terms are highlighted in yellow
+- **Normalized Relevance Scores**: Scores displayed as 0-100 (top result = 100)
+- **Expandable Content**: Click to view full document content
+- **Health Status**: Shows Elasticsearch and embedding service connectivity
+
+### Server Options
+
+```bash
+python run_search_server.py --host 0.0.0.0 --port 8080 --reload
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--host` | `127.0.0.1` | Host to bind |
+| `--port` | `8000` | Port to bind |
+| `--reload` | - | Enable auto-reload for development |
+
 ## Project Structure
 
 ```
@@ -206,7 +238,13 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 │   ├── hybrid_search.py         # RRF hybrid search (kNN + BM25)
 │   ├── index_mapping.py         # Elasticsearch index management
 │   ├── markdown_loader.py       # Markdown document splitting
+│   ├── search_api.py            # FastAPI search backend
 │   └── volcengine_embedding.py  # Volcengine Ark embedding client
+├── frontend/
+│   ├── index.html               # Search interface HTML
+│   └── static/
+│       ├── app.js               # Frontend JavaScript
+│       └── styles.css           # Styling
 ├── config/
 │   ├── higress-ai-search.yaml   # Higress plugin configuration
 │   └── setup_elasticsearch.sh   # ES cluster setup script
@@ -214,6 +252,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 │   └── test_hybrid_search_properties.py  # Property-based tests
 ├── docker-compose.yaml          # Elasticsearch & Kibana stack
 ├── load-markdown-into-es.py     # CLI for document ingestion
+├── run_search_server.py         # Search server launcher
 ├── employee_handbook.md         # Sample knowledge base document
 ├── .env                         # Environment variables (create this)
 └── pyproject.toml              # Python project configuration
