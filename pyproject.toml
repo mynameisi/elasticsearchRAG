@@ -1,0 +1,26 @@
+[project]
+name = "rag-langchain-higress-es"
+version = "0.1.0"
+description = "RAG Application with LangChain, Higress, and Elasticsearch"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "elasticsearch>=8.0.0",
+    "langchain>=0.1.0",
+    "langchain-elasticsearch>=0.2.0",
+    "langchain-text-splitters>=0.0.1",
+    "sqlalchemy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.0.0",
+    "pytest>=7.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
