@@ -251,6 +251,14 @@ Then open http://127.0.0.1:8000 in your browser.
 - **Auto-scroll to Match**: Panel automatically scrolls to the matching paragraph
 - **Health Status**: Shows Elasticsearch and embedding service connectivity
 
+### Document Management (Left Panel)
+
+- **Document List**: View all markdown files with size and indexed chunk count
+- **Upload Documents**: Add new `.md` files via the Upload button
+- **View Documents**: Click any document to view with full markdown rendering
+- **Delete Documents**: Single delete (hover → trash icon) or batch delete (checkboxes)
+- **Reindex**: Re-process all documents with embeddings for search
+
 ### Server Options
 
 ```bash
@@ -280,6 +288,7 @@ python run_search_server.py --host 0.0.0.0 --port 8080 --reload
 │   └── static/
 │       ├── app.js               # Frontend JavaScript
 │       └── styles.css           # Styling
+├── docs/                        # Uploaded documents directory
 ├── config/
 │   ├── higress-ai-search.yaml   # Higress plugin configuration
 │   └── setup_elasticsearch.sh   # ES cluster setup script
@@ -292,6 +301,26 @@ python run_search_server.py --host 0.0.0.0 --port 8080 --reload
 ├── .env                         # Environment variables (create this)
 └── pyproject.toml              # Python project configuration
 ```
+
+## API Reference
+
+### Search Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/search` | GET | Search documents with hybrid or full-text search |
+| `/api/health` | GET | Check Elasticsearch and embedding service status |
+| `/api/document` | GET | Get full document by source path |
+
+### Document Management Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/documents` | GET | List all documents with metadata |
+| `/api/documents/{filename}` | GET | Get document content by filename |
+| `/api/documents/{filename}` | DELETE | Delete document and index entries |
+| `/api/documents/upload` | POST | Upload new markdown files |
+| `/api/reindex` | POST | Reindex all documents with embeddings |
 
 ## CLI Reference
 

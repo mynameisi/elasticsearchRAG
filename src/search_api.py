@@ -5,12 +5,14 @@ FastAPI backend for the RAG search interface with highlighting support.
 """
 
 import os
+import shutil
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -35,6 +37,10 @@ app.add_middleware(
 # Global clients (initialized on startup)
 es_client: Optional[Elasticsearch] = None
 embedding_client: Optional[VolcengineEmbeddingClient] = None
+
+# Documents directory
+DOCS_DIR = Path("docs")
+DOCS_DIR.mkdir(exist_ok=True)
 
 
 class SearchResult(BaseModel):
@@ -313,8 +319,6 @@ async def get_document(
     """
     Get full document content by source path.
     """
-    from pathlib import Path
-    
     try:
         # Security: only allow files within current directory
         file_path = Path(source)
@@ -327,6 +331,10 @@ async def get_document(
         if not file_path.exists():
             # Try just the filename in current directory
             file_path = Path.cwd() / file_path.name
+        
+        # Also check docs directory
+        if not file_path.exists():
+            file_path = DOCS_DIR / Path(source).name
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Document not found")
@@ -345,6 +353,217 @@ async def get_document(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
+
+
+# ==========================================
+# Document Management Endpoints
+# ==========================================
+
+class DocumentInfo(BaseModel):
+    filename: str
+    size: int
+    chunks: int
+
+
+class DocumentsResponse(BaseModel):
+    documents: List[DocumentInfo]
+
+
+@app.get("/api/documents", response_model=DocumentsResponse)
+async def list_documents():
+    """List all documents in the docs directory with their index status."""
+    documents = []
+    
+    # Get chunk counts from Elasticsearch
+    chunk_counts = {}
+    if es_client:
+        try:
+            # Aggregate by source_filename
+            query = {
+                "size": 0,
+                "aggs": {
+                    "by_file": {
+                        "terms": {
+                            "field": "source_filename",
+                            "size": 1000
+                        }
+                    }
+                }
+            }
+            result = es_client.search(index="rag_documents", body=query, ignore=[404])
+            for bucket in result.get("aggregations", {}).get("by_file", {}).get("buckets", []):
+                chunk_counts[bucket["key"]] = bucket["doc_count"]
+        except Exception:
+            pass
+    
+    # List files in docs directory
+    for file_path in DOCS_DIR.glob("*.md"):
+        documents.append(DocumentInfo(
+            filename=file_path.name,
+            size=file_path.stat().st_size,
+            chunks=chunk_counts.get(file_path.name, 0)
+        ))
+    
+    # Also check for markdown files in root
+    for file_path in Path.cwd().glob("*.md"):
+        if file_path.name not in [d.filename for d in documents]:
+            documents.append(DocumentInfo(
+                filename=file_path.name,
+                size=file_path.stat().st_size,
+                chunks=chunk_counts.get(file_path.name, 0)
+            ))
+    
+    # Sort by filename
+    documents.sort(key=lambda d: d.filename.lower())
+    
+    return DocumentsResponse(documents=documents)
+
+
+@app.get("/api/documents/{filename}")
+async def get_document_by_name(filename: str):
+    """Get document content by filename."""
+    # Check docs directory first
+    file_path = DOCS_DIR / filename
+    if not file_path.exists():
+        # Check root directory
+        file_path = Path.cwd() / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if file_path.suffix.lower() not in ['.md', '.markdown', '.txt']:
+        raise HTTPException(status_code=400, detail="Only markdown files supported")
+    
+    content = file_path.read_text(encoding='utf-8')
+    
+    return {
+        "filename": filename,
+        "content": content,
+        "size": file_path.stat().st_size
+    }
+
+
+@app.delete("/api/documents/{filename}")
+async def delete_document(filename: str):
+    """Delete a document and its index entries."""
+    # Find the file
+    file_path = DOCS_DIR / filename
+    if not file_path.exists():
+        file_path = Path.cwd() / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete from Elasticsearch
+    if es_client:
+        try:
+            es_client.delete_by_query(
+                index="rag_documents",
+                body={
+                    "query": {
+                        "term": {
+                            "source_filename": filename
+                        }
+                    }
+                },
+                ignore=[404]
+            )
+        except Exception as e:
+            print(f"Error deleting from index: {e}")
+    
+    # Delete the file (only if in docs directory for safety)
+    if file_path.parent == DOCS_DIR:
+        file_path.unlink()
+    
+    return {"status": "deleted", "filename": filename}
+
+
+@app.post("/api/documents/upload")
+async def upload_documents(files: List[UploadFile] = File(...)):
+    """Upload markdown documents."""
+    uploaded = 0
+    errors = []
+    
+    for file in files:
+        if not file.filename:
+            continue
+            
+        # Validate file type
+        if not file.filename.lower().endswith(('.md', '.markdown', '.txt')):
+            errors.append(f"{file.filename}: Invalid file type")
+            continue
+        
+        try:
+            # Save to docs directory
+            dest_path = DOCS_DIR / file.filename
+            content = await file.read()
+            dest_path.write_bytes(content)
+            uploaded += 1
+        except Exception as e:
+            errors.append(f"{file.filename}: {str(e)}")
+    
+    return {
+        "uploaded": uploaded,
+        "errors": errors
+    }
+
+
+@app.post("/api/reindex")
+async def reindex_documents():
+    """Reindex all documents in the docs directory."""
+    if es_client is None:
+        raise HTTPException(status_code=503, detail="Elasticsearch not available")
+    
+    from src.document_indexer import index_documents
+    from src.markdown_loader import load_markdown_file
+    from src.index_mapping import create_index
+    
+    # Collect all markdown files
+    all_docs = []
+    doc_files = list(DOCS_DIR.glob("*.md")) + list(Path.cwd().glob("*.md"))
+    seen_files = set()
+    
+    for file_path in doc_files:
+        if file_path.name in seen_files:
+            continue
+        seen_files.add(file_path.name)
+        
+        try:
+            docs = load_markdown_file(file_path)
+            for doc in docs:
+                doc.metadata["source"] = str(file_path.absolute())
+            all_docs.extend(docs)
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+    
+    if not all_docs:
+        return {"added": 0, "deleted": 0, "message": "No documents to index"}
+    
+    # Recreate index and reindex
+    try:
+        create_index(es_client, "rag_documents", delete_if_exists=True)
+        
+        # Clear record manager
+        import os
+        if os.path.exists("record_manager.db"):
+            os.remove("record_manager.db")
+        
+        result = index_documents(
+            documents=all_docs,
+            es_client=es_client,
+            index_name="rag_documents",
+            cleanup="full",
+            embedding_client=embedding_client,
+        )
+        
+        return {
+            "added": result.num_added,
+            "deleted": result.num_deleted,
+            "skipped": result.num_skipped,
+            "total_files": len(seen_files)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reindex failed: {str(e)}")
 
 
 # Serve static files

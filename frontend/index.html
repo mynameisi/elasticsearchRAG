@@ -10,6 +10,68 @@
 </head>
 <body>
     <div class="app-container">
+        <!-- Document Management Panel (Left) -->
+        <aside class="docs-panel" id="docs-panel">
+            <div class="docs-header">
+                <h2 class="docs-title">📁 Documents</h2>
+                <button class="icon-button" id="toggle-docs-panel" title="Collapse">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 18l-6-6 6-6"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="docs-actions">
+                <label class="upload-button" title="Upload Markdown files">
+                    <input type="file" id="file-upload" accept=".md,.markdown,.txt" multiple hidden>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Upload
+                </label>
+                <button class="action-button reindex-button" id="reindex-button" title="Reindex all documents">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    Reindex
+                </button>
+            </div>
+
+            <div class="docs-selection-bar hidden" id="selection-bar">
+                <span id="selection-count">0 selected</span>
+                <button class="delete-selected-button" id="delete-selected" title="Delete selected">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Delete
+                </button>
+            </div>
+
+            <div class="docs-list-container">
+                <div id="docs-loading" class="docs-loading">
+                    <div class="spinner small"></div>
+                    <span>Loading documents...</span>
+                </div>
+                <ul class="docs-list" id="docs-list"></ul>
+                <div id="docs-empty" class="docs-empty hidden">
+                    <p>No documents yet</p>
+                    <p class="hint">Upload Markdown files to get started</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Collapsed docs panel toggle -->
+        <button class="docs-panel-toggle hidden" id="docs-panel-expand" title="Show documents">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 18l6-6-6-6"></path>
+            </svg>
+        </button>
+
+        <!-- Search Panel (Center) -->
         <div class="search-panel" id="search-panel">
             <header class="header">
                 <h1 class="logo">🔍 RAG Search</h1>
@@ -71,7 +133,7 @@
             </footer>
         </div>
 
-        <!-- Article Side Panel -->
+        <!-- Article Side Panel (Right) -->
         <div class="article-panel" id="article-panel">
             <div class="article-header">
                 <h2 class="article-title" id="article-title">Document</h2>
@@ -89,6 +151,9 @@
         <!-- Overlay for mobile -->
         <div class="panel-overlay" id="panel-overlay"></div>
     </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" id="toast-container"></div>
 
     <script src="/static/app.js"></script>
 </body>
