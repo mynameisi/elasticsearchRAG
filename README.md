@@ -196,6 +196,39 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+## Kibana Dashboard Analytics
+
+Documents are indexed with rich metadata for Kibana visualizations.
+
+### Available Fields for Dashboards
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `indexed_at` | date | Timestamp when document was indexed |
+| `word_count` | integer | Word count (English words + Chinese characters) |
+| `char_count` | integer | Total character count |
+| `has_code` | boolean | Whether content contains code blocks |
+| `section_depth` | integer | Header depth (1=H1, 2=H2, 3=H3) |
+| `source_filename` | keyword | Source file name |
+| `Header 1` | keyword | Top-level section header |
+| `Header 2` | keyword | Second-level section header |
+| `Header 3` | keyword | Third-level section header |
+
+### Creating Dashboards
+
+1. Go to Kibana → **Stack Management** → **Data Views**
+2. Create data view for `rag_documents`
+3. Go to **Dashboard** → **Create dashboard** → **Create visualization**
+
+### Suggested Visualizations
+
+- **Content by Section**: Bar chart with `Header 2` on X-axis
+- **Word Count Distribution**: Histogram on `word_count`
+- **Section Depth Breakdown**: Pie chart on `section_depth`
+- **Documents with Code**: Metric filtered by `has_code: true`
+- **Average Content Length**: Metric with average of `char_count`
+- **Indexing Timeline**: Line chart on `indexed_at`
+
 ## Web Search Interface
 
 A professional search frontend is included for interactive document search.

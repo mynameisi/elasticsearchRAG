@@ -21,7 +21,8 @@ def get_index_mapping() -> Dict[str, Any]:
     
     The mapping includes:
     - content: A text field for full-text search
-    - embedding: A dense_vector field for semantic search (1024 dimensions for bge-large-zh)
+    - embedding: A dense_vector field for semantic search (2560 dimensions for Doubao)
+    - Analytics fields: indexed_at, word_count, char_count, has_code, section_depth
     
     Returns:
         Dict containing the Elasticsearch index mapping configuration
@@ -37,6 +38,38 @@ def get_index_mapping() -> Dict[str, Any]:
                     "dims": 2560,
                     "index": True,
                     "similarity": "cosine"
+                },
+                # Analytics fields
+                "indexed_at": {
+                    "type": "date"
+                },
+                "word_count": {
+                    "type": "integer"
+                },
+                "char_count": {
+                    "type": "integer"
+                },
+                "has_code": {
+                    "type": "boolean"
+                },
+                "section_depth": {
+                    "type": "integer"
+                },
+                "source_filename": {
+                    "type": "keyword"
+                },
+                # Header fields as keywords for aggregations
+                "Header 1": {
+                    "type": "keyword"
+                },
+                "Header 2": {
+                    "type": "keyword"
+                },
+                "Header 3": {
+                    "type": "keyword"
+                },
+                "source": {
+                    "type": "keyword"
                 }
             }
         }

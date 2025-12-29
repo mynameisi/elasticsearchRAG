@@ -11,9 +11,11 @@ Requirements:
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 import hashlib
+import re
 
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
@@ -61,6 +63,55 @@ def _compute_doc_id(doc: Document) -> str:
     metadata_str = str(sorted(doc.metadata.items()))
     combined = f"{content}:{metadata_str}"
     return hashlib.sha256(combined.encode()).hexdigest()
+
+
+def _enrich_metadata(doc: Document, source_file: Optional[Path] = None) -> dict:
+    """
+    Enrich document with additional metadata for analytics.
+    
+    Adds:
+    - indexed_at: ISO timestamp
+    - word_count: Number of words in content
+    - char_count: Number of characters
+    - has_code: Whether content contains code blocks
+    - section_depth: Header depth (1, 2, or 3)
+    - source_filename: Just the filename without path
+    """
+    content = doc.page_content
+    
+    # Calculate word count (handles both English and Chinese)
+    # For Chinese, count characters; for English, count words
+    english_words = len(re.findall(r'\b[a-zA-Z]+\b', content))
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', content))
+    word_count = english_words + chinese_chars
+    
+    # Detect code blocks
+    has_code = '```' in content or bool(re.search(r'`[^`]+`', content))
+    
+    # Determine section depth from headers
+    section_depth = 0
+    if doc.metadata.get('Header 3'):
+        section_depth = 3
+    elif doc.metadata.get('Header 2'):
+        section_depth = 2
+    elif doc.metadata.get('Header 1'):
+        section_depth = 1
+    
+    # Extract filename from source
+    source_filename = None
+    if source_file:
+        source_filename = source_file.name
+    elif doc.metadata.get('source'):
+        source_filename = Path(doc.metadata['source']).name
+    
+    return {
+        'indexed_at': datetime.now(timezone.utc).isoformat(),
+        'word_count': word_count,
+        'char_count': len(content),
+        'has_code': has_code,
+        'section_depth': section_depth,
+        'source_filename': source_filename,
+    }
 
 
 def index_documents(
@@ -130,10 +181,14 @@ def index_documents(
         # Index documents with embeddings
         for i, (doc_id, doc) in enumerate(docs_to_index):
             try:
+                # Enrich with analytics metadata
+                enriched = _enrich_metadata(doc)
+                
                 es_doc = {
                     "content": doc.page_content,
                     "embedding": embeddings[i],
-                    **doc.metadata
+                    **doc.metadata,
+                    **enriched,
                 }
                 es_client.index(
                     index=index_name,
@@ -148,9 +203,13 @@ def index_documents(
         # Index without embeddings
         for doc_id, doc in docs_to_index:
             try:
+                # Enrich with analytics metadata
+                enriched = _enrich_metadata(doc)
+                
                 es_doc = {
                     "content": doc.page_content,
-                    **doc.metadata
+                    **doc.metadata,
+                    **enriched,
                 }
                 es_client.index(
                     index=index_name,
