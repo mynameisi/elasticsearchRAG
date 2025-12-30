@@ -300,8 +300,17 @@ async function renderPdfPage() {
     const page = await pdfViewerState.pdf.getPage(pdfViewerState.currentPage);
     const viewport = page.getViewport({ scale: pdfViewerState.scale });
     
-    // Remove old canvas and text layer, create new ones
+    // Remove old content, create new wrapper for canvas and text layer
     container.innerHTML = '';
+    
+    // Create a wrapper div to hold canvas and text layer together
+    // This ensures they scroll together and the text layer is positioned correctly
+    const wrapper = document.createElement('div');
+    wrapper.className = 'pdf-page-wrapper';
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'inline-block';
+    wrapper.style.width = viewport.width + 'px';
+    wrapper.style.height = viewport.height + 'px';
     
     const canvas = document.createElement('canvas');
     canvas.id = 'pdf-canvas';
@@ -311,15 +320,18 @@ async function renderPdfPage() {
     // IMPORTANT: Also set CSS display size to prevent auto-scaling
     canvas.style.width = viewport.width + 'px';
     canvas.style.height = viewport.height + 'px';
+    canvas.style.display = 'block';
     console.log('Canvas dimensions set to:', canvas.width, 'x', canvas.height, 'at scale', pdfViewerState.scale);
-    container.appendChild(canvas);
+    wrapper.appendChild(canvas);
     
     const textLayer = document.createElement('div');
     textLayer.id = 'pdf-text-layer';
     textLayer.className = 'pdf-text-layer';
     textLayer.style.width = viewport.width + 'px';
     textLayer.style.height = viewport.height + 'px';
-    container.appendChild(textLayer);
+    wrapper.appendChild(textLayer);
+    
+    container.appendChild(wrapper);
     
     const ctx = canvas.getContext('2d');
     

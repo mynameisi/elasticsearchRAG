@@ -261,6 +261,7 @@ The web interface includes a built-in PDF viewer powered by PDF.js:
 - **Download**: Direct download button for the original PDF file
 - **Text Layer**: Invisible text layer enables search term highlighting in PDFs
 - **Responsive Canvas**: PDF renders at actual size with CSS-controlled display dimensions
+- **Bidirectional Scrolling**: Wide PDFs can be scrolled horizontally in both directions (left and right) when zoomed in
 
 ### Document Management (Left Panel)
 

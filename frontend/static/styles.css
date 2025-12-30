@@ -1121,14 +1121,17 @@ body {
     flex: 1;
     overflow: auto;
     background: #525659;
-    display: flex;
-    justify-content: center;
     padding: 1rem;
+    /* Use block layout instead of flex to allow proper scrolling */
+    /* The canvas will be centered via margin: auto in JS */
+    text-align: center;
 }
 
 #pdf-canvas {
     box-shadow: var(--shadow-lg);
     background: white;
+    display: block;
+    margin: 0 auto;
 }
 
 /* ==========================================
