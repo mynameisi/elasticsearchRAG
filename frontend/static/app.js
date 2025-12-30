@@ -443,7 +443,7 @@ async function renderPdfPage() {
     renderTextLayer(textLayer, textContent, viewport);
     
     // Render highlight boxes for RAG search matches
-    // Uses the same accurate positioning as page text search
+    // Highlights only the specific matching words, not entire text items
     if (pdfViewerState.searchText) {
         const searchTerms = getSearchTerms(pdfViewerState.searchText);
         const pageWrapper = document.querySelector('.pdf-page-wrapper');
@@ -453,8 +453,6 @@ async function renderPdfPage() {
             
             const text = item.str;
             const textLower = text.toLowerCase();
-            const hasMatch = searchTerms.some(term => textLower.includes(term));
-            if (!hasMatch) return;
             
             // Get transform values: [scaleX, skewY, skewX, scaleY, translateX, translateY]
             const tx = item.transform;
@@ -468,23 +466,40 @@ async function renderPdfPage() {
             // Item width in viewport coordinates (item.width is in PDF units)
             const itemWidth = (item.width || text.length * fontHeight * 0.5) * viewport.scale;
             
+            // Character width (approximate)
+            const charWidth = text.length > 0 ? itemWidth / text.length : fontHeight * 0.6;
+            
             // viewY is at the baseline, subtract font height for top
-            const matchTop = viewY - fontHeight;
+            const baseTop = viewY - fontHeight;
             
-            // Create highlight box - add to pageWrapper like page search does
-            const highlight = document.createElement('div');
-            highlight.className = 'pdf-highlight-box';
-            highlight.style.position = 'absolute';
-            highlight.style.left = Math.round(viewX) + 'px';
-            highlight.style.top = Math.round(matchTop) + 'px';
-            highlight.style.width = Math.round(itemWidth) + 'px';
-            highlight.style.height = Math.round(fontHeight * 1.2) + 'px';
-            
-            if (pageWrapper) {
-                pageWrapper.appendChild(highlight);
-            } else {
-                textLayer.appendChild(highlight);
-            }
+            // Find and highlight each occurrence of each search term
+            searchTerms.forEach(term => {
+                let startIndex = 0;
+                let matchIndex;
+                
+                while ((matchIndex = textLower.indexOf(term, startIndex)) !== -1) {
+                    // Calculate position for this specific match
+                    const matchLeft = viewX + (matchIndex * charWidth);
+                    const matchWidth = term.length * charWidth;
+                    
+                    // Create highlight box for just this word
+                    const highlight = document.createElement('div');
+                    highlight.className = 'pdf-highlight-box';
+                    highlight.style.position = 'absolute';
+                    highlight.style.left = Math.round(matchLeft) + 'px';
+                    highlight.style.top = Math.round(baseTop) + 'px';
+                    highlight.style.width = Math.round(Math.max(matchWidth, 8)) + 'px';
+                    highlight.style.height = Math.round(fontHeight * 1.2) + 'px';
+                    
+                    if (pageWrapper) {
+                        pageWrapper.appendChild(highlight);
+                    } else {
+                        textLayer.appendChild(highlight);
+                    }
+                    
+                    startIndex = matchIndex + 1;
+                }
+            });
         });
     }
 }
