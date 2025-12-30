@@ -251,6 +251,17 @@ Then open http://127.0.0.1:8000 in your browser.
 - **Auto-scroll to Match**: Panel automatically scrolls to the matching paragraph
 - **Health Status**: Shows Elasticsearch and embedding service connectivity
 
+### PDF Viewer
+
+The web interface includes a built-in PDF viewer powered by PDF.js:
+
+- **Zoom Controls**: Click `+` / `−` buttons to zoom in/out (30% - 300% range)
+- **Page Navigation**: Navigate multi-page PDFs with `◀` / `▶` buttons
+- **Page Display**: Shows current page number and total pages
+- **Download**: Direct download button for the original PDF file
+- **Text Layer**: Invisible text layer enables search term highlighting in PDFs
+- **Responsive Canvas**: PDF renders at actual size with CSS-controlled display dimensions
+
 ### Document Management (Left Panel)
 
 - **Document List**: View all markdown files with size and indexed chunk count

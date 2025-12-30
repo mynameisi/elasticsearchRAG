@@ -21,6 +21,7 @@ from elasticsearch import Elasticsearch
 
 from src.index_mapping import get_elasticsearch_client
 from src.volcengine_embedding import get_embedding_client, VolcengineEmbeddingClient
+from src.document_loader import load_document, get_supported_extensions, SUPPORTED_EXTENSIONS
 
 
 app = FastAPI(title="RAG Search API", version="1.0.0")
@@ -317,7 +318,7 @@ async def get_document(
     source: str = Query(..., description="Source file path"),
 ):
     """
-    Get full document content by source path.
+    Get full document content by source path. Supports MD, PDF, DOCX.
     """
     try:
         # Security: only allow files within current directory
@@ -327,7 +328,7 @@ async def get_document(
         if not file_path.is_absolute():
             file_path = Path.cwd() / file_path
         
-        # Check if file exists and is a markdown file
+        # Check if file exists
         if not file_path.exists():
             # Try just the filename in current directory
             file_path = Path.cwd() / file_path.name
@@ -339,14 +340,37 @@ async def get_document(
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Document not found")
         
-        if file_path.suffix.lower() not in ['.md', '.markdown', '.txt']:
-            raise HTTPException(status_code=400, detail="Only markdown files supported")
+        suffix = file_path.suffix.lower()
         
-        content = file_path.read_text(encoding='utf-8')
+        if suffix not in SUPPORTED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+            )
+        
+        # Read content based on file type
+        if suffix == ".md":
+            content = file_path.read_text(encoding='utf-8')
+        elif suffix == ".pdf":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(str(file_path))
+            pages = loader.load()
+            content_parts = []
+            for i, page in enumerate(pages):
+                content_parts.append(f"## Page {i + 1}\n\n{page.page_content}")
+            content = "\n\n---\n\n".join(content_parts)
+        elif suffix == ".docx":
+            from langchain_community.document_loaders import Docx2txtLoader
+            loader = Docx2txtLoader(str(file_path))
+            docs = loader.load()
+            content = "\n\n".join(doc.page_content for doc in docs)
+        else:
+            content = file_path.read_text(encoding='utf-8')
         
         return {
             "source": str(source),
             "content": content,
+            "file_type": suffix[1:]
         }
         
     except HTTPException:
@@ -363,6 +387,7 @@ class DocumentInfo(BaseModel):
     filename: str
     size: int
     chunks: int
+    file_type: str  # md, pdf, docx
 
 
 class DocumentsResponse(BaseModel):
@@ -373,6 +398,7 @@ class DocumentsResponse(BaseModel):
 async def list_documents():
     """List all documents in the docs directory with their index status."""
     documents = []
+    seen_files = set()
     
     # Get chunk counts from Elasticsearch
     chunk_counts = {}
@@ -396,22 +422,29 @@ async def list_documents():
         except Exception:
             pass
     
-    # List files in docs directory
-    for file_path in DOCS_DIR.glob("*.md"):
-        documents.append(DocumentInfo(
-            filename=file_path.name,
-            size=file_path.stat().st_size,
-            chunks=chunk_counts.get(file_path.name, 0)
-        ))
+    # List all supported files in docs directory
+    for ext in SUPPORTED_EXTENSIONS:
+        for file_path in DOCS_DIR.glob(f"*{ext}"):
+            if file_path.name not in seen_files:
+                seen_files.add(file_path.name)
+                documents.append(DocumentInfo(
+                    filename=file_path.name,
+                    size=file_path.stat().st_size,
+                    chunks=chunk_counts.get(file_path.name, 0),
+                    file_type=ext[1:]  # Remove the dot
+                ))
     
-    # Also check for markdown files in root
-    for file_path in Path.cwd().glob("*.md"):
-        if file_path.name not in [d.filename for d in documents]:
-            documents.append(DocumentInfo(
-                filename=file_path.name,
-                size=file_path.stat().st_size,
-                chunks=chunk_counts.get(file_path.name, 0)
-            ))
+    # Also check for supported files in root
+    for ext in SUPPORTED_EXTENSIONS:
+        for file_path in Path.cwd().glob(f"*{ext}"):
+            if file_path.name not in seen_files:
+                seen_files.add(file_path.name)
+                documents.append(DocumentInfo(
+                    filename=file_path.name,
+                    size=file_path.stat().st_size,
+                    chunks=chunk_counts.get(file_path.name, 0),
+                    file_type=ext[1:]  # Remove the dot
+                ))
     
     # Sort by filename
     documents.sort(key=lambda d: d.filename.lower())
@@ -421,7 +454,7 @@ async def list_documents():
 
 @app.get("/api/documents/{filename}")
 async def get_document_by_name(filename: str):
-    """Get document content by filename."""
+    """Get document content by filename. Returns text content for all supported types."""
     # Check docs directory first
     file_path = DOCS_DIR / filename
     if not file_path.exists():
@@ -431,15 +464,43 @@ async def get_document_by_name(filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document not found")
     
-    if file_path.suffix.lower() not in ['.md', '.markdown', '.txt']:
-        raise HTTPException(status_code=400, detail="Only markdown files supported")
+    suffix = file_path.suffix.lower()
     
-    content = file_path.read_text(encoding='utf-8')
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+        )
+    
+    file_type = suffix[1:]  # Remove the dot
+    
+    try:
+        if suffix == ".md":
+            content = file_path.read_text(encoding='utf-8')
+        elif suffix == ".pdf":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(str(file_path))
+            pages = loader.load()
+            # Combine all pages with page markers
+            content_parts = []
+            for i, page in enumerate(pages):
+                content_parts.append(f"## Page {i + 1}\n\n{page.page_content}")
+            content = "\n\n---\n\n".join(content_parts)
+        elif suffix == ".docx":
+            from langchain_community.document_loaders import Docx2txtLoader
+            loader = Docx2txtLoader(str(file_path))
+            docs = loader.load()
+            content = "\n\n".join(doc.page_content for doc in docs)
+        else:
+            content = file_path.read_text(encoding='utf-8')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
     
     return {
         "filename": filename,
         "content": content,
-        "size": file_path.stat().st_size
+        "size": file_path.stat().st_size,
+        "file_type": file_type
     }
 
 
@@ -478,19 +539,52 @@ async def delete_document(filename: str):
     return {"status": "deleted", "filename": filename}
 
 
+@app.get("/api/documents/{filename}/raw")
+async def get_document_raw(filename: str):
+    """Serve the raw document file for native viewing (PDF, DOCX)."""
+    # Check docs directory first
+    file_path = DOCS_DIR / filename
+    if not file_path.exists():
+        # Check root directory
+        file_path = Path.cwd() / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    suffix = file_path.suffix.lower()
+    
+    # Set appropriate content type
+    content_types = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".md": "text/markdown",
+    }
+    
+    content_type = content_types.get(suffix, "application/octet-stream")
+    
+    return FileResponse(
+        path=file_path,
+        media_type=content_type,
+        filename=filename
+    )
+
+
 @app.post("/api/documents/upload")
 async def upload_documents(files: List[UploadFile] = File(...)):
-    """Upload markdown documents."""
+    """Upload documents (MD, PDF, DOCX)."""
     uploaded = 0
     errors = []
+    
+    # Build list of valid extensions
+    valid_extensions = tuple(SUPPORTED_EXTENSIONS) + ('.markdown', '.txt')
     
     for file in files:
         if not file.filename:
             continue
             
         # Validate file type
-        if not file.filename.lower().endswith(('.md', '.markdown', '.txt')):
-            errors.append(f"{file.filename}: Invalid file type")
+        if not file.filename.lower().endswith(valid_extensions):
+            errors.append(f"{file.filename}: Invalid file type. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
             continue
         
         try:
@@ -510,31 +604,30 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 
 @app.post("/api/reindex")
 async def reindex_documents():
-    """Reindex all documents in the docs directory."""
+    """Reindex all documents in the docs directory (MD, PDF, DOCX)."""
     if es_client is None:
         raise HTTPException(status_code=503, detail="Elasticsearch not available")
     
     from src.document_indexer import index_documents
-    from src.markdown_loader import load_markdown_file
     from src.index_mapping import create_index
     
-    # Collect all markdown files
+    # Collect all supported files
     all_docs = []
-    doc_files = list(DOCS_DIR.glob("*.md")) + list(Path.cwd().glob("*.md"))
     seen_files = set()
     
-    for file_path in doc_files:
-        if file_path.name in seen_files:
-            continue
-        seen_files.add(file_path.name)
-        
-        try:
-            docs = load_markdown_file(file_path)
-            for doc in docs:
-                doc.metadata["source"] = str(file_path.absolute())
-            all_docs.extend(docs)
-        except Exception as e:
-            print(f"Error loading {file_path}: {e}")
+    # Gather files from docs directory and root
+    for ext in SUPPORTED_EXTENSIONS:
+        for file_path in list(DOCS_DIR.glob(f"*{ext}")) + list(Path.cwd().glob(f"*{ext}")):
+            if file_path.name in seen_files:
+                continue
+            seen_files.add(file_path.name)
+            
+            try:
+                docs = load_document(file_path)
+                all_docs.extend(docs)
+                print(f"Loaded {len(docs)} chunks from {file_path.name}")
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
     
     if not all_docs:
         return {"added": 0, "deleted": 0, "message": "No documents to index"}

@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="/static/styles.css">
     <!-- Marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- PDF.js for PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+    <!-- Mammoth.js for DOCX rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -22,8 +26,8 @@
             </div>
             
             <div class="docs-actions">
-                <label class="upload-button" title="Upload Markdown files">
-                    <input type="file" id="file-upload" accept=".md,.markdown,.txt" multiple hidden>
+                <label class="upload-button" title="Upload documents (MD, PDF, DOCX)">
+                    <input type="file" id="file-upload" accept=".md,.markdown,.txt,.pdf,.docx" multiple hidden>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
@@ -59,7 +63,7 @@
                 <ul class="docs-list" id="docs-list"></ul>
                 <div id="docs-empty" class="docs-empty hidden">
                     <p>No documents yet</p>
-                    <p class="hint">Upload Markdown files to get started</p>
+                    <p class="hint">Upload MD, PDF, or DOCX files to get started</p>
                 </div>
             </div>
         </aside>
@@ -155,6 +159,6 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/app.js"></script>
+    <script type="module" src="/static/app.js"></script>
 </body>
 </html>

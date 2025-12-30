@@ -44,6 +44,18 @@ let currentSearchQuery = '';
 let documents = [];
 let selectedDocs = new Set();
 
+// File type icons
+const FILE_ICONS = {
+    'md': '📝',
+    'pdf': '📕',
+    'docx': '📘',
+    'default': '📄'
+};
+
+function getFileIcon(fileType) {
+    return FILE_ICONS[fileType] || FILE_ICONS['default'];
+}
+
 // ==========================================
 // Toast Notifications
 // ==========================================
@@ -100,12 +112,15 @@ function renderDocumentsList() {
         li.className = 'doc-item';
         li.dataset.filename = doc.filename;
         
+        const icon = getFileIcon(doc.file_type);
+        const fileTypeLabel = doc.file_type ? doc.file_type.toUpperCase() : '';
+        
         li.innerHTML = `
             <input type="checkbox" class="doc-checkbox" data-filename="${doc.filename}">
-            <span class="doc-icon">📄</span>
+            <span class="doc-icon">${icon}</span>
             <div class="doc-info">
                 <div class="doc-name" title="${doc.filename}">${doc.filename}</div>
-                <div class="doc-meta">${formatFileSize(doc.size)} • ${doc.chunks} chunks</div>
+                <div class="doc-meta">${formatFileSize(doc.size)} • ${doc.chunks} chunks${fileTypeLabel ? ' • ' + fileTypeLabel : ''}</div>
             </div>
             <button class="doc-delete" title="Delete" data-filename="${doc.filename}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -173,18 +188,358 @@ async function viewDocument(filename) {
     appContainer.classList.add('panel-open');
     panelOverlay.classList.add('visible');
     
+    // Determine file type
+    const ext = filename.split('.').pop().toLowerCase();
+    
     try {
-        const response = await fetch(`${API_BASE}/documents/${encodeURIComponent(filename)}`);
-        if (!response.ok) throw new Error('Failed to load document');
-        
-        const data = await response.json();
-        
-        // Render markdown
-        marked.setOptions({ breaks: true, gfm: true });
-        articleContent.innerHTML = marked.parse(data.content);
-        
+        if (ext === 'pdf') {
+            await renderPDF(filename);
+        } else if (ext === 'docx') {
+            await renderDOCX(filename);
+        } else {
+            // Markdown and other text files
+            const response = await fetch(`${API_BASE}/documents/${encodeURIComponent(filename)}`);
+            if (!response.ok) throw new Error('Failed to load document');
+            
+            const data = await response.json();
+            marked.setOptions({ breaks: true, gfm: true });
+            articleContent.innerHTML = marked.parse(data.content);
+        }
     } catch (e) {
         articleContent.innerHTML = `<p class="error">Failed to load document: ${e.message}</p>`;
+    }
+}
+
+// Global PDF viewer state
+let pdfViewerState = null;
+let currentRenderTask = null;
+
+// Render PDF using PDF.js with text search
+async function renderPDF(filename, searchText = null) {
+    const url = `${API_BASE}/documents/${encodeURIComponent(filename)}/raw`;
+    
+    // Create PDF container with controls
+    articleContent.innerHTML = `
+        <div class="pdf-viewer">
+            <div class="pdf-controls">
+                <button class="pdf-btn" id="pdf-prev-btn" title="Previous page">◀</button>
+                <span class="pdf-page-info">
+                    Page <span id="pdf-page-num">1</span> of <span id="pdf-page-count">-</span>
+                </span>
+                <button class="pdf-btn" id="pdf-next-btn" title="Next page">▶</button>
+                <span class="pdf-zoom-controls">
+                    <button class="pdf-btn" id="pdf-zoom-out-btn" title="Zoom out">−</button>
+                    <span id="pdf-zoom-level">100%</span>
+                    <button class="pdf-btn" id="pdf-zoom-in-btn" title="Zoom in">+</button>
+                </span>
+                <a href="${url}" download="${filename}" class="pdf-btn pdf-download" title="Download">⬇ Download</a>
+            </div>
+            <div class="pdf-canvas-container" id="pdf-canvas-container">
+                <canvas id="pdf-canvas"></canvas>
+                <div id="pdf-text-layer" class="pdf-text-layer"></div>
+            </div>
+        </div>
+    `;
+    
+    // Attach event listeners to buttons (more reliable than inline onclick)
+    document.getElementById('pdf-prev-btn').addEventListener('click', pdfPrevPage);
+    document.getElementById('pdf-next-btn').addEventListener('click', pdfNextPage);
+    document.getElementById('pdf-zoom-out-btn').addEventListener('click', pdfZoomOut);
+    document.getElementById('pdf-zoom-in-btn').addEventListener('click', pdfZoomIn);
+    
+    // Load PDF.js dynamically
+    const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+    
+    const loadingTask = pdfjsLib.getDocument(url);
+    const pdf = await loadingTask.promise;
+    
+    // Store state globally - start with a reasonable scale
+    // The zoom level will be displayed relative to this base scale
+    pdfViewerState = {
+        currentPage: 1,
+        scale: 1.0,  // Base scale - represents 100%
+        pdf: pdf,
+        searchText: searchText
+    };
+    
+    document.getElementById('pdf-page-count').textContent = pdf.numPages;
+    
+    // Find the right page if we have search text
+    if (searchText) {
+        pdfViewerState.currentPage = await findPdfPageWithText(searchText);
+    }
+    
+    // Initial render
+    await renderPdfPage();
+}
+
+async function renderPdfPage() {
+    if (!pdfViewerState) {
+        console.error('renderPdfPage: pdfViewerState is null');
+        return;
+    }
+    
+    const container = document.getElementById('pdf-canvas-container');
+    if (!container) {
+        console.error('renderPdfPage: container element not found');
+        return;
+    }
+    
+    // Cancel any pending render task
+    if (currentRenderTask) {
+        try {
+            currentRenderTask.cancel();
+        } catch (e) {
+            // Ignore cancellation errors
+        }
+        currentRenderTask = null;
+    }
+    
+    // Get the page and viewport
+    const page = await pdfViewerState.pdf.getPage(pdfViewerState.currentPage);
+    const viewport = page.getViewport({ scale: pdfViewerState.scale });
+    
+    // Remove old canvas and text layer, create new ones
+    container.innerHTML = '';
+    
+    const canvas = document.createElement('canvas');
+    canvas.id = 'pdf-canvas';
+    // Set internal canvas size
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    // IMPORTANT: Also set CSS display size to prevent auto-scaling
+    canvas.style.width = viewport.width + 'px';
+    canvas.style.height = viewport.height + 'px';
+    console.log('Canvas dimensions set to:', canvas.width, 'x', canvas.height, 'at scale', pdfViewerState.scale);
+    container.appendChild(canvas);
+    
+    const textLayer = document.createElement('div');
+    textLayer.id = 'pdf-text-layer';
+    textLayer.className = 'pdf-text-layer';
+    textLayer.style.width = viewport.width + 'px';
+    textLayer.style.height = viewport.height + 'px';
+    container.appendChild(textLayer);
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Render the page
+    const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+    };
+    
+    currentRenderTask = page.render(renderContext);
+    
+    try {
+        await currentRenderTask.promise;
+    } catch (e) {
+        if (e.name === 'RenderingCancelledException') {
+            // This is expected when we cancel a render
+            return;
+        }
+        throw e;
+    }
+    
+    currentRenderTask = null;
+    
+    const pageNumEl = document.getElementById('pdf-page-num');
+    if (pageNumEl) pageNumEl.textContent = pdfViewerState.currentPage;
+    
+    // Render text layer for search highlighting
+    const textContent = await page.getTextContent();
+    textContent.items.forEach(item => {
+        const span = document.createElement('span');
+        span.textContent = item.str;
+        span.style.position = 'absolute';
+        span.style.left = (item.transform[4] * pdfViewerState.scale / viewport.scale) + 'px';
+        span.style.top = (viewport.height - item.transform[5] * pdfViewerState.scale / viewport.scale - item.height * pdfViewerState.scale) + 'px';
+        span.style.fontSize = (item.height * pdfViewerState.scale) + 'px';
+        textLayer.appendChild(span);
+    });
+    
+    if (pdfViewerState.searchText) {
+        highlightTextInElement(textLayer, pdfViewerState.searchText);
+    }
+}
+
+async function findPdfPageWithText(text) {
+    if (!pdfViewerState || !text) return 1;
+    const searchLower = text.toLowerCase().substring(0, 50);
+    
+    for (let i = 1; i <= pdfViewerState.pdf.numPages; i++) {
+        const page = await pdfViewerState.pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ').toLowerCase();
+        if (pageText.includes(searchLower)) {
+            return i;
+        }
+    }
+    return 1;
+}
+
+// PDF navigation functions
+async function pdfPrevPage() {
+    if (!pdfViewerState || pdfViewerState.currentPage <= 1) return;
+    pdfViewerState.currentPage--;
+    try {
+        await renderPdfPage();
+    } catch (e) {
+        console.error('Error rendering PDF page:', e);
+    }
+}
+
+async function pdfNextPage() {
+    if (!pdfViewerState || pdfViewerState.currentPage >= pdfViewerState.pdf.numPages) return;
+    pdfViewerState.currentPage++;
+    try {
+        await renderPdfPage();
+    } catch (e) {
+        console.error('Error rendering PDF page:', e);
+    }
+}
+
+async function pdfZoomIn() {
+    console.log('pdfZoomIn called, current state:', pdfViewerState);
+    if (!pdfViewerState) {
+        console.error('pdfZoomIn: pdfViewerState is null');
+        return;
+    }
+    const oldScale = pdfViewerState.scale;
+    pdfViewerState.scale = Math.min(pdfViewerState.scale + 0.2, 3);
+    console.log('Scale changed from', oldScale, 'to', pdfViewerState.scale);
+    const zoomEl = document.getElementById('pdf-zoom-level');
+    if (zoomEl) {
+        const zoomText = Math.round(pdfViewerState.scale * 100) + '%';
+        console.log('Updating zoom text to:', zoomText);
+        zoomEl.textContent = zoomText;
+    } else {
+        console.error('Zoom level element not found');
+    }
+    try {
+        console.log('Calling renderPdfPage...');
+        await renderPdfPage();
+        console.log('renderPdfPage completed');
+    } catch (e) {
+        console.error('Error rendering PDF page:', e);
+    }
+}
+
+async function pdfZoomOut() {
+    if (!pdfViewerState) return;
+    pdfViewerState.scale = Math.max(pdfViewerState.scale - 0.2, 0.3);
+    const zoomEl = document.getElementById('pdf-zoom-level');
+    if (zoomEl) zoomEl.textContent = Math.round(pdfViewerState.scale * 100) + '%';
+    try {
+        await renderPdfPage();
+    } catch (e) {
+        console.error('Error rendering PDF page:', e);
+    }
+}
+
+// Make PDF functions globally available
+window.pdfPrevPage = pdfPrevPage;
+window.pdfNextPage = pdfNextPage;
+window.pdfZoomIn = pdfZoomIn;
+window.pdfZoomOut = pdfZoomOut;
+
+// Render DOCX using Mammoth.js with highlighting
+async function renderDOCX(filename, searchText = null) {
+    const url = `${API_BASE}/documents/${encodeURIComponent(filename)}/raw`;
+    
+    articleContent.innerHTML = `
+        <div class="docx-viewer">
+            <div class="docx-controls">
+                <a href="${url}" download="${filename}" class="pdf-btn pdf-download" title="Download">⬇ Download Original</a>
+            </div>
+            <div class="docx-content" id="docx-content">
+                <div class="docs-loading"><div class="spinner small"></div><span>Rendering document...</span></div>
+            </div>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch document');
+        
+        const arrayBuffer = await response.arrayBuffer();
+        
+        // Use Mammoth.js to convert DOCX to HTML
+        const result = await mammoth.convertToHtml(
+            { arrayBuffer },
+            {
+                styleMap: [
+                    "p[style-name='Heading 1'] => h1:fresh",
+                    "p[style-name='Heading 2'] => h2:fresh",
+                    "p[style-name='Heading 3'] => h3:fresh",
+                ]
+            }
+        );
+        
+        const docxContent = document.getElementById('docx-content');
+        docxContent.innerHTML = result.value;
+        
+        // Highlight and scroll to search text if provided
+        if (searchText) {
+            highlightTextInElement(docxContent, searchText);
+            
+            // Scroll to first highlight
+            setTimeout(() => {
+                const firstHighlight = docxContent.querySelector('.search-highlight');
+                if (firstHighlight) {
+                    firstHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Add flash animation
+                    firstHighlight.closest('p, div, li, td')?.classList.add('highlight-section');
+                }
+            }, 100);
+        }
+        
+        // Show any conversion warnings
+        if (result.messages.length > 0) {
+            console.log('Mammoth conversion messages:', result.messages);
+        }
+    } catch (e) {
+        document.getElementById('docx-content').innerHTML = `<p class="error">Failed to render document: ${e.message}</p>`;
+    }
+}
+
+// Helper function to highlight text in an element
+function highlightTextInElement(element, searchText) {
+    if (!searchText || searchText.length < 3) return;
+    
+    // Extract key phrases (first 100 chars, split into words)
+    const words = searchText.substring(0, 100).toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length >= 3)
+        .slice(0, 10); // Max 10 words
+    
+    if (words.length === 0) return;
+    
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    
+    for (const textNode of textNodes) {
+        const parentTag = textNode.parentNode.tagName?.toLowerCase();
+        if (parentTag === 'mark' || parentTag === 'script' || parentTag === 'style') continue;
+        
+        const text = textNode.textContent;
+        const textLower = text.toLowerCase();
+        
+        // Check if any search word is in this text
+        const hasMatch = words.some(word => textLower.includes(word));
+        if (!hasMatch) continue;
+        
+        // Build regex for all words
+        const escapedWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const pattern = new RegExp(`(${escapedWords.join('|')})`, 'gi');
+        const highlighted = text.replace(pattern, '<mark class="search-highlight">$1</mark>');
+        
+        if (highlighted !== text) {
+            const span = document.createElement('span');
+            span.innerHTML = highlighted;
+            textNode.parentNode.replaceChild(span, textNode);
+        }
     }
 }
 
@@ -397,7 +752,14 @@ function displayResults(data) {
 function createResultCard(result, index) {
     const metaTags = Object.entries(result.metadata)
         .filter(([key]) => !key.startsWith('_') && key !== 'source')
-        .map(([key, value]) => `<span class="meta-tag">${escapeHtml(key)}: ${escapeHtml(String(value))}</span>`)
+        .map(([key, value]) => {
+            // Add icon for file_type
+            if (key === 'file_type') {
+                const icon = FILE_ICONS[value] || FILE_ICONS['default'];
+                return `<span class="meta-tag">${icon} ${escapeHtml(String(value).toUpperCase())}</span>`;
+            }
+            return `<span class="meta-tag">${escapeHtml(key)}: ${escapeHtml(String(value))}</span>`;
+        })
         .join('');
     
     const snippet = result.highlights.length > 0 
@@ -437,21 +799,39 @@ async function openArticlePanel(index) {
     document.querySelectorAll('.doc-item').forEach(item => item.classList.remove('active'));
     
     articleTitle.textContent = result.title;
-    
-    const fullContent = await getFullDocument(result);
-    const renderedHtml = renderMarkdownWithHighlight(fullContent, result.content);
-    articleContent.innerHTML = renderedHtml;
+    articleContent.innerHTML = '<div class="docs-loading"><div class="spinner small"></div><span>Loading...</span></div>';
     
     articlePanel.classList.add('open');
     appContainer.classList.add('panel-open');
     panelOverlay.classList.add('visible');
     
-    setTimeout(() => {
-        const highlightedSection = articleContent.querySelector('.highlight-section');
-        if (highlightedSection) {
-            highlightedSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Determine file type from metadata
+    const fileType = result.metadata.file_type;
+    const sourceFilename = result.metadata.source_filename;
+    // Use the matched content for highlighting
+    const searchContent = result.content;
+    
+    try {
+        if (fileType === 'pdf' && sourceFilename) {
+            await renderPDF(sourceFilename, searchContent);
+        } else if (fileType === 'docx' && sourceFilename) {
+            await renderDOCX(sourceFilename, searchContent);
+        } else {
+            // Markdown and other text files - use existing logic
+            const fullContent = await getFullDocument(result);
+            const renderedHtml = renderMarkdownWithHighlight(fullContent, result.content);
+            articleContent.innerHTML = renderedHtml;
+            
+            setTimeout(() => {
+                const highlightedSection = articleContent.querySelector('.highlight-section');
+                if (highlightedSection) {
+                    highlightedSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
         }
-    }, 100);
+    } catch (e) {
+        articleContent.innerHTML = `<p class="error">Failed to load document: ${e.message}</p>`;
+    }
 }
 
 async function getFullDocument(result) {
