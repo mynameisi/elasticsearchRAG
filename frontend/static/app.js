@@ -443,44 +443,48 @@ async function renderPdfPage() {
     renderTextLayer(textLayer, textContent, viewport);
     
     // Render highlight boxes for RAG search matches
+    // Uses the same accurate positioning as page text search
     if (pdfViewerState.searchText) {
         const searchTerms = getSearchTerms(pdfViewerState.searchText);
+        const pageWrapper = document.querySelector('.pdf-page-wrapper');
         
         textContent.items.forEach(item => {
             if (!item.str || item.str.trim() === '') return;
             
-            const textLower = item.str.toLowerCase();
+            const text = item.str;
+            const textLower = text.toLowerCase();
             const hasMatch = searchTerms.some(term => textLower.includes(term));
             if (!hasMatch) return;
             
-            // Get position using viewport conversion
-            const tx = item.transform[4];
-            const ty = item.transform[5];
-            const [viewX, viewY] = viewport.convertToViewportPoint(tx, ty);
+            // Get transform values: [scaleX, skewY, skewX, scaleY, translateX, translateY]
+            const tx = item.transform;
             
-            // Get font size from transform
-            const fontSize = Math.sqrt(
-                item.transform[2] * item.transform[2] + 
-                item.transform[3] * item.transform[3]
-            ) || item.height || 12;
+            // Use viewport.convertToViewportPoint for coordinate conversion
+            const [viewX, viewY] = viewport.convertToViewportPoint(tx[4], tx[5]);
             
-            // Get width - use item.width scaled by the horizontal transform component
-            const scaleX = Math.sqrt(
-                item.transform[0] * item.transform[0] + 
-                item.transform[1] * item.transform[1]
-            );
-            const textWidth = (item.width || item.str.length * fontSize * 0.5) * scaleX;
+            // Font height: the vertical scaling component of the transform, scaled by viewport
+            const fontHeight = Math.hypot(tx[2], tx[3]) * viewport.scale;
             
-            // Create highlight box
+            // Item width in viewport coordinates (item.width is in PDF units)
+            const itemWidth = (item.width || text.length * fontHeight * 0.5) * viewport.scale;
+            
+            // viewY is at the baseline, subtract font height for top
+            const matchTop = viewY - fontHeight;
+            
+            // Create highlight box - add to pageWrapper like page search does
             const highlight = document.createElement('div');
             highlight.className = 'pdf-highlight-box';
             highlight.style.position = 'absolute';
             highlight.style.left = Math.round(viewX) + 'px';
-            highlight.style.top = Math.round(viewY - fontSize) + 'px';
-            highlight.style.width = Math.round(textWidth) + 'px';
-            highlight.style.height = Math.round(fontSize * 1.15) + 'px';
+            highlight.style.top = Math.round(matchTop) + 'px';
+            highlight.style.width = Math.round(itemWidth) + 'px';
+            highlight.style.height = Math.round(fontHeight * 1.2) + 'px';
             
-            textLayer.appendChild(highlight);
+            if (pageWrapper) {
+                pageWrapper.appendChild(highlight);
+            } else {
+                textLayer.appendChild(highlight);
+            }
         });
     }
 }
