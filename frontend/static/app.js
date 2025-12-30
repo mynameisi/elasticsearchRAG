@@ -215,7 +215,7 @@ let pdfViewerState = null;
 let currentRenderTask = null;
 
 // Render PDF using PDF.js with text search
-async function renderPDF(filename, searchText = null) {
+async function renderPDF(filename, searchText = null, targetPage = null) {
     const url = `${API_BASE}/documents/${encodeURIComponent(filename)}/raw`;
     
     // Create PDF container with controls
@@ -227,6 +227,12 @@ async function renderPDF(filename, searchText = null) {
                     Page <span id="pdf-page-num">1</span> of <span id="pdf-page-count">-</span>
                 </span>
                 <button class="pdf-btn" id="pdf-next-btn" title="Next page">▶</button>
+                <div class="pdf-page-search">
+                    <input type="text" id="pdf-page-search-input" class="pdf-search-input" placeholder="Search in page..." />
+                    <button class="pdf-btn pdf-search-btn" id="pdf-search-prev" title="Previous match">▲</button>
+                    <button class="pdf-btn pdf-search-btn" id="pdf-search-next" title="Next match">▼</button>
+                    <span class="pdf-search-count" id="pdf-search-count"></span>
+                </div>
                 <span class="pdf-zoom-controls">
                     <button class="pdf-btn" id="pdf-zoom-out-btn" title="Zoom out">−</button>
                     <span id="pdf-zoom-level">100%</span>
@@ -234,6 +240,9 @@ async function renderPDF(filename, searchText = null) {
                 </span>
                 <a href="${url}" download="${filename}" class="pdf-btn pdf-download" title="Download">⬇ Download</a>
             </div>
+            ${searchText ? `<div class="pdf-search-info" id="pdf-search-info">
+                <span class="search-indicator">🔍 Highlighting search matches</span>
+            </div>` : ''}
             <div class="pdf-canvas-container" id="pdf-canvas-container">
                 <canvas id="pdf-canvas"></canvas>
                 <div id="pdf-text-layer" class="pdf-text-layer"></div>
@@ -246,6 +255,25 @@ async function renderPDF(filename, searchText = null) {
     document.getElementById('pdf-next-btn').addEventListener('click', pdfNextPage);
     document.getElementById('pdf-zoom-out-btn').addEventListener('click', pdfZoomOut);
     document.getElementById('pdf-zoom-in-btn').addEventListener('click', pdfZoomIn);
+    
+    // Page search event listeners
+    const pageSearchInput = document.getElementById('pdf-page-search-input');
+    pageSearchInput.addEventListener('input', debounce(performPageSearch, 300));
+    pageSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                navigatePageSearchMatch(-1);
+            } else {
+                navigatePageSearchMatch(1);
+            }
+        } else if (e.key === 'Escape') {
+            pageSearchInput.value = '';
+            clearPageSearchHighlights();
+        }
+    });
+    document.getElementById('pdf-search-prev').addEventListener('click', () => navigatePageSearchMatch(-1));
+    document.getElementById('pdf-search-next').addEventListener('click', () => navigatePageSearchMatch(1));
     
     // Load PDF.js dynamically
     const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs');
@@ -277,13 +305,53 @@ async function renderPDF(filename, searchText = null) {
     
     document.getElementById('pdf-page-count').textContent = pdf.numPages;
     
-    // Find the right page if we have search text
-    if (searchText) {
+    // Jump to target page - use provided page number or search for text
+    if (targetPage && targetPage >= 1 && targetPage <= pdf.numPages) {
+        // Use the page number from metadata directly
+        pdfViewerState.currentPage = targetPage;
+    } else if (searchText) {
+        // Fallback: search for the page containing the text
         pdfViewerState.currentPage = await findPdfPageWithText(searchText);
     }
     
     // Initial render
     await renderPdfPage();
+    
+    // Scroll to first highlight after rendering
+    if (searchText) {
+        setTimeout(() => {
+            scrollToFirstPdfHighlight();
+        }, 300);
+    }
+}
+
+// Scroll to the first highlighted text in PDF
+function scrollToFirstPdfHighlight() {
+    const textLayer = document.getElementById('pdf-text-layer');
+    if (!textLayer) return;
+    
+    const firstHighlight = textLayer.querySelector('.search-highlight');
+    if (firstHighlight) {
+        const container = document.getElementById('pdf-canvas-container');
+        if (container) {
+            // Get the highlight position relative to the container
+            const highlightRect = firstHighlight.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            // Calculate scroll position to center the highlight
+            const scrollTop = container.scrollTop + (highlightRect.top - containerRect.top) - (containerRect.height / 3);
+            container.scrollTo({
+                top: Math.max(0, scrollTop),
+                behavior: 'smooth'
+            });
+            
+            // Add flash animation to highlight
+            firstHighlight.classList.add('highlight-flash');
+            setTimeout(() => {
+                firstHighlight.classList.remove('highlight-flash');
+            }, 2000);
+        }
+    }
 }
 
 async function renderPdfPage() {
@@ -370,21 +438,120 @@ async function renderPdfPage() {
     const pageNumEl = document.getElementById('pdf-page-num');
     if (pageNumEl) pageNumEl.textContent = pdfViewerState.currentPage;
     
-    // Render text layer for search highlighting
+    // Render the text layer with positioned spans for text selection and search
     const textContent = await page.getTextContent();
-    textContent.items.forEach(item => {
+    renderTextLayer(textLayer, textContent, viewport);
+    
+    // Render highlight boxes for RAG search matches
+    if (pdfViewerState.searchText) {
+        const searchTerms = getSearchTerms(pdfViewerState.searchText);
+        
+        textContent.items.forEach(item => {
+            if (!item.str || item.str.trim() === '') return;
+            
+            const textLower = item.str.toLowerCase();
+            const hasMatch = searchTerms.some(term => textLower.includes(term));
+            if (!hasMatch) return;
+            
+            // Get position using viewport conversion
+            const tx = item.transform[4];
+            const ty = item.transform[5];
+            const [viewX, viewY] = viewport.convertToViewportPoint(tx, ty);
+            
+            // Get font size from transform
+            const fontSize = Math.sqrt(
+                item.transform[2] * item.transform[2] + 
+                item.transform[3] * item.transform[3]
+            ) || item.height || 12;
+            
+            // Get width - use item.width scaled by the horizontal transform component
+            const scaleX = Math.sqrt(
+                item.transform[0] * item.transform[0] + 
+                item.transform[1] * item.transform[1]
+            );
+            const textWidth = (item.width || item.str.length * fontSize * 0.5) * scaleX;
+            
+            // Create highlight box
+            const highlight = document.createElement('div');
+            highlight.className = 'pdf-highlight-box';
+            highlight.style.position = 'absolute';
+            highlight.style.left = Math.round(viewX) + 'px';
+            highlight.style.top = Math.round(viewY - fontSize) + 'px';
+            highlight.style.width = Math.round(textWidth) + 'px';
+            highlight.style.height = Math.round(fontSize * 1.15) + 'px';
+            
+            textLayer.appendChild(highlight);
+        });
+    }
+}
+
+// Render text layer with positioned spans (for potential text selection)
+function renderTextLayer(textLayerDiv, textContent, viewport) {
+    textContent.items.forEach((item, index) => {
+        if (!item.str || item.str.trim() === '') return;
+        
+        const tx = item.transform;
+        
+        // Create span for this text item
         const span = document.createElement('span');
         span.textContent = item.str;
+        span.dataset.itemIndex = index;
+        
+        // Use viewport.convertToViewportPoint for consistent coordinate conversion
+        const [viewX, viewY] = viewport.convertToViewportPoint(tx[4], tx[5]);
+        
+        // Calculate font height (scaled)
+        const fontHeight = Math.hypot(tx[2], tx[3]) * viewport.scale;
+        
+        // Get angle for rotation if any
+        const angle = Math.atan2(tx[1], tx[0]);
+        
+        // viewY is at baseline, subtract font height for top
+        const top = viewY - fontHeight;
+        
+        // Apply styles
         span.style.position = 'absolute';
-        span.style.left = (item.transform[4] * pdfViewerState.scale / viewport.scale) + 'px';
-        span.style.top = (viewport.height - item.transform[5] * pdfViewerState.scale / viewport.scale - item.height * pdfViewerState.scale) + 'px';
-        span.style.fontSize = (item.height * pdfViewerState.scale) + 'px';
-        textLayer.appendChild(span);
+        span.style.left = `${viewX}px`;
+        span.style.top = `${top}px`;
+        span.style.fontSize = `${fontHeight}px`;
+        span.style.fontFamily = item.fontName || 'sans-serif';
+        span.style.transformOrigin = '0% 0%';
+        span.style.whiteSpace = 'pre';
+        
+        // Apply rotation if needed
+        if (Math.abs(angle) > 0.001) {
+            span.style.transform = `rotate(${angle}rad)`;
+        }
+        
+        // Scale width to match PDF text width
+        if (item.width && item.str.length > 0) {
+            const targetWidth = item.width * viewport.scale;
+            // Use a canvas to measure natural text width
+            span.style.width = `${targetWidth}px`;
+            span.style.display = 'inline-block';
+        }
+        
+        textLayerDiv.appendChild(span);
     });
+}
+
+// Extract search terms from query
+function getSearchTerms(searchText) {
+    if (!searchText || searchText.length < 2) return [];
     
-    if (pdfViewerState.searchText) {
-        highlightTextInElement(textLayer, pdfViewerState.searchText);
+    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'it', 'its']);
+    
+    const words = searchText.toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length >= 2 && !stopWords.has(w))
+        .slice(0, 5);
+    
+    // If all filtered out, use original
+    if (words.length === 0) {
+        words.push(searchText.toLowerCase().trim());
     }
+    
+    return words;
 }
 
 async function findPdfPageWithText(text) {
@@ -408,6 +575,11 @@ async function pdfPrevPage() {
     pdfViewerState.currentPage--;
     try {
         await renderPdfPage();
+        // Re-apply page search if there's an active search term
+        const searchInput = document.getElementById('pdf-page-search-input');
+        if (searchInput?.value.trim()) {
+            performPageSearch();
+        }
     } catch (e) {
         console.error('Error rendering PDF page:', e);
     }
@@ -418,6 +590,11 @@ async function pdfNextPage() {
     pdfViewerState.currentPage++;
     try {
         await renderPdfPage();
+        // Re-apply page search if there's an active search term
+        const searchInput = document.getElementById('pdf-page-search-input');
+        if (searchInput?.value.trim()) {
+            performPageSearch();
+        }
     } catch (e) {
         console.error('Error rendering PDF page:', e);
     }
@@ -466,6 +643,208 @@ window.pdfPrevPage = pdfPrevPage;
 window.pdfNextPage = pdfNextPage;
 window.pdfZoomIn = pdfZoomIn;
 window.pdfZoomOut = pdfZoomOut;
+
+// ==========================================
+// PDF Page Search Functions
+// ==========================================
+
+// Page search state
+let pageSearchState = {
+    matches: [],
+    currentMatchIndex: -1,
+    searchTerm: ''
+};
+
+// Debounce helper
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Perform search on current page
+async function performPageSearch() {
+    const searchInput = document.getElementById('pdf-page-search-input');
+    const searchCountEl = document.getElementById('pdf-search-count');
+    const searchTerm = searchInput?.value.trim().toLowerCase();
+    
+    // Clear previous highlights
+    clearPageSearchHighlights();
+    
+    // Reset state
+    pageSearchState = {
+        matches: [],
+        currentMatchIndex: -1,
+        searchTerm: searchTerm || ''
+    };
+    
+    if (!searchTerm || searchTerm.length < 2 || !pdfViewerState) {
+        if (searchCountEl) searchCountEl.textContent = '';
+        return;
+    }
+    
+    try {
+        const pageWrapper = document.querySelector('.pdf-page-wrapper');
+        if (!pageWrapper) {
+            console.error('Page wrapper not found');
+            return;
+        }
+        
+        const page = await pdfViewerState.pdf.getPage(pdfViewerState.currentPage);
+        const textContent = await page.getTextContent();
+        const viewport = page.getViewport({ scale: pdfViewerState.scale });
+        
+        const matches = [];
+        
+        textContent.items.forEach((item, itemIndex) => {
+            if (!item.str) return;
+            
+            const text = item.str;
+            const textLower = text.toLowerCase();
+            let startIndex = 0;
+            let matchIndex;
+            
+            while ((matchIndex = textLower.indexOf(searchTerm, startIndex)) !== -1) {
+                // Get transform values: [scaleX, skewY, skewX, scaleY, translateX, translateY]
+                const tx = item.transform;
+                
+                // Use viewport.convertToViewportPoint for coordinate conversion
+                // This handles the PDF->viewport coordinate transformation including scale
+                const [viewX, viewY] = viewport.convertToViewportPoint(tx[4], tx[5]);
+                
+                // Font height: the vertical scaling component of the transform
+                // Already need to scale by viewport for display
+                const fontHeight = Math.hypot(tx[2], tx[3]) * viewport.scale;
+                
+                // Item width in viewport coordinates
+                // item.width is in PDF units, needs scaling
+                const itemWidth = (item.width || text.length * fontHeight * 0.5) * viewport.scale;
+                
+                // Character width (approximate - assumes monospace-ish distribution)
+                const charWidth = text.length > 0 ? itemWidth / text.length : fontHeight * 0.6;
+                
+                // Calculate match position within the text item
+                const matchLeft = viewX + (matchIndex * charWidth);
+                const matchWidth = searchTerm.length * charWidth;
+                
+                // viewY from convertToViewportPoint is at the text baseline
+                // Subtract font height to get top of text
+                const matchTop = viewY - fontHeight;
+                
+                matches.push({
+                    itemIndex,
+                    textIndex: matchIndex,
+                    left: Math.round(matchLeft),
+                    top: Math.round(matchTop),
+                    width: Math.round(Math.max(matchWidth, 8)),
+                    height: Math.round(fontHeight * 1.2),
+                    text: text.substring(matchIndex, matchIndex + searchTerm.length)
+                });
+                
+                startIndex = matchIndex + 1;
+            }
+        });
+        
+        pageSearchState.matches = matches;
+        console.log(`Found ${matches.length} matches for "${searchTerm}"`);
+        
+        // Create highlight elements
+        matches.forEach((match, index) => {
+            const highlight = document.createElement('div');
+            highlight.className = 'pdf-page-search-highlight';
+            highlight.dataset.matchIndex = index;
+            highlight.style.position = 'absolute';
+            highlight.style.left = match.left + 'px';
+            highlight.style.top = match.top + 'px';
+            highlight.style.width = match.width + 'px';
+            highlight.style.height = match.height + 'px';
+            pageWrapper.appendChild(highlight);
+        });
+        
+        // Update count display
+        if (searchCountEl) {
+            if (matches.length > 0) {
+                searchCountEl.textContent = `${matches.length} found`;
+                navigatePageSearchMatch(1);
+            } else {
+                searchCountEl.textContent = 'No matches';
+            }
+        }
+    } catch (e) {
+        console.error('Error during page search:', e);
+        if (searchCountEl) searchCountEl.textContent = 'Error';
+    }
+}
+
+// Navigate to next/previous match
+function navigatePageSearchMatch(direction) {
+    const matches = pageSearchState.matches;
+    if (matches.length === 0) return;
+    
+    const searchCountEl = document.getElementById('pdf-search-count');
+    const pageWrapper = document.querySelector('.pdf-page-wrapper');
+    
+    // Remove current highlight class from previous match
+    if (pageSearchState.currentMatchIndex >= 0) {
+        const prevHighlight = pageWrapper?.querySelector(`.pdf-page-search-highlight[data-match-index="${pageSearchState.currentMatchIndex}"]`);
+        if (prevHighlight) {
+            prevHighlight.classList.remove('current');
+        }
+    }
+    
+    // Calculate new index
+    let newIndex = pageSearchState.currentMatchIndex + direction;
+    if (newIndex >= matches.length) newIndex = 0;
+    if (newIndex < 0) newIndex = matches.length - 1;
+    
+    pageSearchState.currentMatchIndex = newIndex;
+    
+    // Highlight current match
+    const currentHighlight = pageWrapper?.querySelector(`.pdf-page-search-highlight[data-match-index="${newIndex}"]`);
+    if (currentHighlight) {
+        currentHighlight.classList.add('current');
+        
+        // Scroll to current match
+        const container = document.getElementById('pdf-canvas-container');
+        if (container) {
+            const highlightRect = currentHighlight.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            const scrollTop = container.scrollTop + (highlightRect.top - containerRect.top) - (containerRect.height / 3);
+            container.scrollTo({
+                top: Math.max(0, scrollTop),
+                behavior: 'smooth'
+            });
+        }
+    }
+    
+    // Update count display
+    if (searchCountEl) {
+        searchCountEl.textContent = `${newIndex + 1} / ${matches.length}`;
+    }
+}
+
+// Clear page search highlights
+function clearPageSearchHighlights() {
+    const pageWrapper = document.querySelector('.pdf-page-wrapper');
+    if (pageWrapper) {
+        const highlights = pageWrapper.querySelectorAll('.pdf-page-search-highlight');
+        highlights.forEach(h => h.remove());
+    }
+    pageSearchState = {
+        matches: [],
+        currentMatchIndex: -1,
+        searchTerm: ''
+    };
+    const searchCountEl = document.getElementById('pdf-search-count');
+    if (searchCountEl) searchCountEl.textContent = '';
+}
 
 // Render DOCX using Mammoth.js with highlighting
 async function renderDOCX(filename, searchText = null) {
@@ -528,41 +907,68 @@ async function renderDOCX(filename, searchText = null) {
 }
 
 // Helper function to highlight text in an element
-function highlightTextInElement(element, searchText) {
-    if (!searchText || searchText.length < 3) return;
+function highlightTextInElement(element, searchText, isPdfTextLayer = false) {
+    if (!searchText || searchText.length < 2) return;
     
-    // Extract key phrases (first 100 chars, split into words)
-    const words = searchText.substring(0, 100).toLowerCase()
+    // For search queries: use the whole query and significant words
+    // Split by spaces and filter out very short/common words
+    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'it', 'its']);
+    
+    const words = searchText.toLowerCase()
         .split(/\s+/)
-        .filter(w => w.length >= 3)
-        .slice(0, 10); // Max 10 words
+        .filter(w => w.length >= 2 && !stopWords.has(w))
+        .slice(0, 5); // Max 5 significant words
     
-    if (words.length === 0) return;
+    if (words.length === 0) {
+        // If all words were filtered out, use the original search text
+        words.push(searchText.toLowerCase().trim());
+    }
     
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
-    const textNodes = [];
-    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    // Build regex pattern for all words
+    const escapedWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const pattern = new RegExp(`(${escapedWords.join('|')})`, 'gi');
     
-    for (const textNode of textNodes) {
-        const parentTag = textNode.parentNode.tagName?.toLowerCase();
-        if (parentTag === 'mark' || parentTag === 'script' || parentTag === 'style') continue;
+    if (isPdfTextLayer) {
+        // For PDF text layer: directly modify each span's innerHTML
+        // This preserves the absolute positioning of each span
+        const spans = element.querySelectorAll('span');
+        spans.forEach(span => {
+            const text = span.textContent;
+            if (!text) return;
+            
+            const textLower = text.toLowerCase();
+            const hasMatch = words.some(word => textLower.includes(word));
+            if (!hasMatch) return;
+            
+            const highlighted = text.replace(pattern, '<mark class="search-highlight">$1</mark>');
+            if (highlighted !== text) {
+                span.innerHTML = highlighted;
+            }
+        });
+    } else {
+        // For other elements: use TreeWalker approach
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        while (walker.nextNode()) textNodes.push(walker.currentNode);
         
-        const text = textNode.textContent;
-        const textLower = text.toLowerCase();
-        
-        // Check if any search word is in this text
-        const hasMatch = words.some(word => textLower.includes(word));
-        if (!hasMatch) continue;
-        
-        // Build regex for all words
-        const escapedWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-        const pattern = new RegExp(`(${escapedWords.join('|')})`, 'gi');
-        const highlighted = text.replace(pattern, '<mark class="search-highlight">$1</mark>');
-        
-        if (highlighted !== text) {
-            const span = document.createElement('span');
-            span.innerHTML = highlighted;
-            textNode.parentNode.replaceChild(span, textNode);
+        for (const textNode of textNodes) {
+            const parentTag = textNode.parentNode.tagName?.toLowerCase();
+            if (parentTag === 'mark' || parentTag === 'script' || parentTag === 'style') continue;
+            
+            const text = textNode.textContent;
+            const textLower = text.toLowerCase();
+            
+            // Check if any search word is in this text
+            const hasMatch = words.some(word => textLower.includes(word));
+            if (!hasMatch) continue;
+            
+            const highlighted = text.replace(pattern, '<mark class="search-highlight">$1</mark>');
+            
+            if (highlighted !== text) {
+                const span = document.createElement('span');
+                span.innerHTML = highlighted;
+                textNode.parentNode.replaceChild(span, textNode);
+            }
         }
     }
 }
@@ -774,8 +1180,12 @@ function displayResults(data) {
 }
 
 function createResultCard(result, index) {
+    const fileType = result.metadata.file_type;
+    const pageNum = result.metadata.page !== undefined ? result.metadata.page + 1 : null;
+    const section = result.metadata.section;
+    
     const metaTags = Object.entries(result.metadata)
-        .filter(([key]) => !key.startsWith('_') && key !== 'source')
+        .filter(([key]) => !key.startsWith('_') && key !== 'source' && key !== 'page' && key !== 'section')
         .map(([key, value]) => {
             // Add icon for file_type
             if (key === 'file_type') {
@@ -794,12 +1204,21 @@ function createResultCard(result, index) {
         ? `<span class="result-score">Relevance: ${result.normalizedScore}</span>`
         : '';
     
+    // Create location indicator for PDFs (page) or MD (section)
+    let locationTag = '';
+    if (fileType === 'pdf' && pageNum) {
+        locationTag = `<span class="meta-tag location-tag" title="Click to jump to page ${pageNum}">📍 Page ${pageNum}</span>`;
+    } else if (section) {
+        locationTag = `<span class="meta-tag location-tag" title="Click to jump to section">📍 ${escapeHtml(section)}</span>`;
+    }
+    
     return `
         <article class="result-card" data-index="${index}">
             <h3 class="result-title">${escapeHtml(result.title)}</h3>
             <p class="result-snippet">${snippet}</p>
             <div class="result-meta">
                 ${metaTags}
+                ${locationTag}
                 ${scoreDisplay}
                 <span class="result-arrow">→</span>
             </div>
@@ -832,14 +1251,16 @@ async function openArticlePanel(index) {
     // Determine file type from metadata
     const fileType = result.metadata.file_type;
     const sourceFilename = result.metadata.source_filename;
-    // Use the matched content for highlighting
-    const searchContent = result.content;
+    // Use the actual search query for highlighting (not the result content)
+    const searchQuery = currentSearchQuery;
+    // Get page number from metadata (0-indexed in ES, convert to 1-indexed for display)
+    const targetPage = result.metadata.page !== undefined ? result.metadata.page + 1 : null;
     
     try {
         if (fileType === 'pdf' && sourceFilename) {
-            await renderPDF(sourceFilename, searchContent);
+            await renderPDF(sourceFilename, searchQuery, targetPage);
         } else if (fileType === 'docx' && sourceFilename) {
-            await renderDOCX(sourceFilename, searchContent);
+            await renderDOCX(sourceFilename, searchQuery);
         } else {
             // Markdown and other text files - use existing logic
             const fullContent = await getFullDocument(result);

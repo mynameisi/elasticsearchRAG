@@ -603,6 +603,19 @@ body {
     border-radius: var(--radius-sm);
 }
 
+.meta-tag.location-tag {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    font-weight: 500;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.result-card:hover .meta-tag.location-tag {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
 .result-score {
     color: var(--color-text-secondary);
     font-size: 0.8rem;
@@ -1035,6 +1048,22 @@ body {
         width: 100%;
         min-width: 100%;
     }
+    
+    /* PDF controls responsive */
+    .pdf-page-search {
+        width: 100%;
+        order: 10;
+        margin-left: 0;
+        padding-left: 0;
+        border-left: none;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--color-border);
+    }
+    
+    .pdf-search-input {
+        flex: 1;
+        min-width: 0;
+    }
 }
 
 
@@ -1052,12 +1081,13 @@ body {
 .pdf-controls {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.75rem;
     padding: 0.75rem 1rem;
     background: var(--color-bg);
     border-bottom: 1px solid var(--color-border);
     border-radius: var(--radius-md) var(--radius-md) 0 0;
     flex-wrap: wrap;
+    row-gap: 0.5rem;
 }
 
 .pdf-btn {
@@ -1089,6 +1119,52 @@ body {
 .pdf-page-info {
     font-size: 0.85rem;
     color: var(--color-text-secondary);
+}
+
+/* PDF Page Search */
+.pdf-page-search {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.5rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--color-border);
+}
+
+.pdf-search-input {
+    width: 140px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    outline: none;
+    transition: all var(--transition);
+}
+
+.pdf-search-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.pdf-search-input::placeholder {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+}
+
+.pdf-search-btn {
+    padding: 0.35rem 0.5rem !important;
+    font-size: 0.7rem !important;
+    min-width: auto;
+}
+
+.pdf-search-count {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    min-width: 60px;
+    text-align: center;
+    white-space: nowrap;
 }
 
 .pdf-zoom-controls {
@@ -1132,6 +1208,17 @@ body {
     background: white;
     display: block;
     margin: 0 auto;
+    position: relative;
+    z-index: 1;
+}
+
+/* PDF page wrapper - contains canvas and text layer */
+.pdf-page-wrapper {
+    position: relative !important;
+    display: inline-block;
+    margin: 0 auto;
+    /* Ensure it's the positioning context for highlights */
+    isolation: isolate;
 }
 
 /* ==========================================
@@ -1249,26 +1336,122 @@ body {
 }
 
 
+/* PDF Search Info Bar */
+.pdf-search-info {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: var(--color-highlight);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.85rem;
+    color: var(--color-highlight-text);
+}
+
+.search-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 /* PDF Text Layer for highlighting */
 .pdf-text-layer {
     position: absolute;
     top: 0;
     left: 0;
-    overflow: hidden;
-    opacity: 0.3;
+    overflow: visible;
+    opacity: 1;
     line-height: 1;
     pointer-events: none;
+    /* Required for PDF.js TextLayer */
+    text-size-adjust: none;
+    forced-color-adjust: none;
+    z-index: 2;
 }
 
-.pdf-text-layer span {
+.pdf-text-layer > span {
     color: transparent;
+    position: absolute;
     white-space: pre;
+    line-height: 1;
+    margin: 0;
+    padding: 0;
+    transform-origin: 0% 0%;
+    /* Make spans selectable for getting their bounding boxes */
+    pointer-events: auto;
 }
 
-.pdf-text-layer .search-highlight {
-    background: var(--color-highlight);
+/* Nested spans from highlighting should inherit position */
+.pdf-text-layer > span span {
+    position: static;
+    display: inline;
+}
+
+.pdf-text-layer br {
     color: transparent;
+    position: absolute;
+}
+
+/* Hide endOfContent marker from PDF.js */
+.pdf-text-layer .endOfContent {
+    display: none;
+}
+
+/* PDF highlight box for search matches (from RAG search) */
+.pdf-highlight-box {
+    background: rgba(254, 240, 138, 0.5);
+    border-radius: 3px;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    border-bottom: 2px solid rgba(234, 179, 8, 0.6);
+}
+
+/* PDF page search highlights */
+.pdf-page-search-highlight {
+    background: rgba(255, 200, 0, 0.5) !important;
+    border-radius: 3px;
+    pointer-events: none;
+    border: 2px solid rgba(255, 150, 0, 0.8);
+    z-index: 10;
+    box-shadow: 0 0 4px rgba(255, 200, 0, 0.6);
+    transition: all 0.15s ease;
+}
+
+.pdf-page-search-highlight.current {
+    background: rgba(0, 255, 100, 0.6) !important;
+    border-color: rgba(0, 200, 80, 1);
+    box-shadow: 0 0 0 3px rgba(0, 255, 100, 0.4), 0 0 12px rgba(0, 255, 100, 0.6);
+    z-index: 11;
+}
+
+/* Search highlight styles - works for both mark and span.search-highlight */
+.pdf-text-layer .search-highlight,
+.pdf-text-layer mark.search-highlight {
+    background: rgba(254, 240, 138, 0.95) !important;
+    color: transparent !important;
     border-radius: 2px;
+    box-shadow: 0 0 0 3px rgba(254, 240, 138, 0.95);
+    padding: 2px 0;
+}
+
+/* Flash animation for scrolled-to highlight */
+.pdf-text-layer .search-highlight.highlight-flash,
+.pdf-text-layer mark.search-highlight.highlight-flash {
+    animation: pdfHighlightFlash 2s ease-out;
+}
+
+@keyframes pdfHighlightFlash {
+    0% {
+        background: #fde047 !important;
+        box-shadow: 0 0 0 6px #fde047, 0 0 20px #fde047;
+    }
+    50% {
+        background: #fef08a !important;
+        box-shadow: 0 0 0 4px #fef08a;
+    }
+    100% {
+        background: rgba(254, 240, 138, 0.95) !important;
+        box-shadow: 0 0 0 3px rgba(254, 240, 138, 0.95);
+    }
 }
 
 .pdf-canvas-container {
