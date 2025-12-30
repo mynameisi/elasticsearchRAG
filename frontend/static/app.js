@@ -254,14 +254,26 @@ async function renderPDF(filename, searchText = null) {
     const loadingTask = pdfjsLib.getDocument(url);
     const pdf = await loadingTask.promise;
     
-    // Store state globally - start with a reasonable scale
-    // The zoom level will be displayed relative to this base scale
+    // Get the first page to calculate fit-to-width scale
+    const firstPage = await pdf.getPage(1);
+    const defaultViewport = firstPage.getViewport({ scale: 1.0 });
+    
+    // Calculate the scale needed to fit the page width to the container
+    const container = document.getElementById('pdf-canvas-container');
+    const containerWidth = container.clientWidth - 40; // Account for padding
+    const fitWidthScale = containerWidth / defaultViewport.width;
+    
+    // Store state globally - start with fit-to-width scale
     pdfViewerState = {
         currentPage: 1,
-        scale: 1.0,  // Base scale - represents 100%
+        scale: fitWidthScale,
         pdf: pdf,
         searchText: searchText
     };
+    
+    // Update the zoom level display to show the calculated percentage
+    const zoomEl = document.getElementById('pdf-zoom-level');
+    if (zoomEl) zoomEl.textContent = Math.round(fitWidthScale * 100) + '%';
     
     document.getElementById('pdf-page-count').textContent = pdf.numPages;
     

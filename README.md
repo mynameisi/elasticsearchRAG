@@ -255,6 +255,7 @@ Then open http://127.0.0.1:8000 in your browser.
 
 The web interface includes a built-in PDF viewer powered by PDF.js:
 
+- **Fit-to-Width**: PDFs open at a zoom level that fills the container width automatically
 - **Zoom Controls**: Click `+` / `−` buttons to zoom in/out (30% - 300% range)
 - **Page Navigation**: Navigate multi-page PDFs with `◀` / `▶` buttons
 - **Page Display**: Shows current page number and total pages
