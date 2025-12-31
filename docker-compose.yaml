@@ -1,51 +1,95 @@
+# Docker Compose configuration for RAG Application
+# Starts Elasticsearch (vector store) and Kibana (web UI)
+#
+# Usage:
+#   docker-compose up -d        # Start services in background
+#   docker-compose down         # Stop services
+#   docker-compose down -v      # Stop and delete all data
+#   docker-compose logs -f      # View logs
+
 version: "3.8"
 
 services:
+  # ===========================================
+  # Elasticsearch - Vector Store & Search Engine
+  # ===========================================
+  # Stores documents with embeddings and provides hybrid search
+  # (semantic kNN + full-text BM25 with RRF fusion)
   elasticsearch:
+    # Official Elastic image - version 8.15.0 supports dense_vector and RRF
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
     container_name: elasticsearch
+    
     environment:
-      - node.name=es01
-      - cluster.name=rag-cluster
-      - discovery.type=single-node
-      - ELASTIC_PASSWORD=test123
-      - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false
-      - xpack.ml.enabled=true
-      - xpack.ml.use_auto_machine_memory_percent=true
+      # Node and cluster configuration
+      - node.name=es01                    # Name of this ES node
+      - cluster.name=rag-cluster          # Cluster name (for multi-node setups)
+      - discovery.type=single-node        # Run as single node (no cluster discovery)
+      
+      # Security settings
+      - ELASTIC_PASSWORD=test123          # Password for 'elastic' superuser
+      - xpack.security.enabled=true       # Enable authentication
+      - xpack.security.http.ssl.enabled=false  # Disable HTTPS (dev only!)
+      
+      # Machine Learning settings (required for vector search)
+      - xpack.ml.enabled=true             # Enable ML features
+      - xpack.ml.use_auto_machine_memory_percent=true  # Auto-configure ML memory
+    
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "9200:9200"   # REST API - used by Python client
+      - "9300:9300"   # Inter-node communication (not used in single-node)
+    
     volumes:
+      # Persistent storage for index data
+      # Data survives container restarts; deleted with 'docker-compose down -v'
       - elasticsearch-data:/usr/share/elasticsearch/data
+    
     networks:
-      - rag-network
+      - rag-network   # Internal network for ES <-> Kibana communication
+    
+    # Health check - ensures ES is ready before Kibana starts
     healthcheck:
       test: ["CMD-SHELL", "curl -s -u elastic:test123 http://localhost:9200/_cluster/health | grep -q 'status'"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 30s   # Check every 30 seconds
+      timeout: 10s    # Timeout after 10 seconds
+      retries: 5      # Retry 5 times before marking unhealthy
 
+  # ===========================================
+  # Kibana - Web UI for Elasticsearch
+  # ===========================================
+  # Optional: Provides visual interface for exploring data,
+  # running queries, and monitoring cluster health
   kibana:
     image: docker.elastic.co/kibana/kibana:8.15.0
     container_name: kibana
+    
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=test123
-      - XPACK_SECURITY_ENABLED=true
+      # Connection to Elasticsearch
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200  # ES URL (uses Docker network)
+      - ELASTICSEARCH_USERNAME=kibana_system           # Built-in Kibana user
+      - ELASTICSEARCH_PASSWORD=test123                 # Same password as ES
+      - XPACK_SECURITY_ENABLED=true                    # Enable security features
+    
     ports:
-      - "5601:5601"
+      - "5601:5601"   # Kibana web UI - access at http://localhost:5601
+    
     networks:
-      - rag-network
+      - rag-network   # Same network as Elasticsearch
+    
     depends_on:
       elasticsearch:
-        condition: service_healthy
+        condition: service_healthy  # Wait for ES to be healthy before starting
 
+# ===========================================
+# Volumes - Persistent Data Storage
+# ===========================================
 volumes:
   elasticsearch-data:
-    driver: local
+    driver: local   # Store data on local filesystem
 
+# ===========================================
+# Networks - Container Communication
+# ===========================================
 networks:
   rag-network:
-    driver: bridge
+    driver: bridge  # Standard Docker bridge network
