@@ -431,21 +431,9 @@ async def list_documents():
         except Exception:
             pass
     
-    # List all supported files in docs directory
+    # List all supported files in docs directory only
     for ext in SUPPORTED_EXTENSIONS:
         for file_path in DOCS_DIR.glob(f"*{ext}"):
-            if file_path.name not in seen_files:
-                seen_files.add(file_path.name)
-                documents.append(DocumentInfo(
-                    filename=file_path.name,
-                    size=file_path.stat().st_size,
-                    chunks=chunk_counts.get(file_path.name, 0),
-                    file_type=ext[1:]  # Remove the dot
-                ))
-    
-    # Also check for supported files in root
-    for ext in SUPPORTED_EXTENSIONS:
-        for file_path in Path.cwd().glob(f"*{ext}"):
             if file_path.name not in seen_files:
                 seen_files.add(file_path.name)
                 documents.append(DocumentInfo(
@@ -464,11 +452,8 @@ async def list_documents():
 @app.get("/api/documents/{filename}")
 async def get_document_by_name(filename: str):
     """Get document content by filename. Returns text content for all supported types."""
-    # Check docs directory first
+    # Check docs directory only
     file_path = DOCS_DIR / filename
-    if not file_path.exists():
-        # Check root directory
-        file_path = Path.cwd() / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document not found")
@@ -516,10 +501,8 @@ async def get_document_by_name(filename: str):
 @app.delete("/api/documents/{filename}")
 async def delete_document(filename: str):
     """Delete a document and its index entries."""
-    # Find the file
+    # Find the file in docs directory only
     file_path = DOCS_DIR / filename
-    if not file_path.exists():
-        file_path = Path.cwd() / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document not found")
@@ -541,9 +524,8 @@ async def delete_document(filename: str):
         except Exception as e:
             print(f"Error deleting from index: {e}")
     
-    # Delete the file (only if in docs directory for safety)
-    if file_path.parent == DOCS_DIR:
-        file_path.unlink()
+    # Delete the file
+    file_path.unlink()
     
     return {"status": "deleted", "filename": filename}
 
@@ -551,11 +533,8 @@ async def delete_document(filename: str):
 @app.get("/api/documents/{filename}/raw")
 async def get_document_raw(filename: str):
     """Serve the raw document file for native viewing (PDF, DOCX)."""
-    # Check docs directory first
+    # Check docs directory only
     file_path = DOCS_DIR / filename
-    if not file_path.exists():
-        # Check root directory
-        file_path = Path.cwd() / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document not found")
@@ -624,9 +603,9 @@ async def reindex_documents():
     all_docs = []
     seen_files = set()
     
-    # Gather files from docs directory and root
+    # Gather files from docs directory only
     for ext in SUPPORTED_EXTENSIONS:
-        for file_path in list(DOCS_DIR.glob(f"*{ext}")) + list(Path.cwd().glob(f"*{ext}")):
+        for file_path in DOCS_DIR.glob(f"*{ext}"):
             if file_path.name in seen_files:
                 continue
             seen_files.add(file_path.name)
