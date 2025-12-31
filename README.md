@@ -79,6 +79,7 @@ Or create a `.env` file:
 ```
 ARK_API_KEY=your-api-key
 ARK_EMBEDDING_ENDPOINT=ep-xxxxxxxx-xxxxx
+DASHSCOPE_API_KEY=your-dashscope-api-key
 ```
 
 ### 4. Index Documents with Embeddings
@@ -231,7 +232,7 @@ Documents are indexed with rich metadata for Kibana visualizations.
 
 ## Web Search Interface
 
-A professional search frontend is included for interactive document search.
+A professional search frontend is included for interactive document search and AI-powered chat.
 
 ### Start the Search Server
 
@@ -243,6 +244,7 @@ Then open http://127.0.0.1:8000 in your browser.
 
 ### Features
 
+- **Tab Navigation**: Switch between Search and Chat modes
 - **Hybrid Search Toggle**: Switch between hybrid (semantic + keyword) and full-text only search
 - **Highlighted Results**: Matching terms are highlighted in yellow in search snippets
 - **Normalized Relevance Scores**: Scores displayed as 0-100 (top result = 100)
@@ -250,6 +252,25 @@ Then open http://127.0.0.1:8000 in your browser.
 - **Search Term Highlighting**: All search terms highlighted throughout the document
 - **Auto-scroll to Match**: Panel automatically scrolls to the matching paragraph
 - **Health Status**: Shows Elasticsearch and embedding service connectivity
+
+### AI Chat (RAG-Powered)
+
+The Chat tab provides an AI-powered conversational interface using RAG:
+
+- **Multi-turn Conversations**: Chat history is maintained for contextual responses
+- **RAG Integration**: Toggle to enable/disable knowledge base retrieval
+- **Streaming Responses**: Real-time streaming via Server-Sent Events (SSE)
+- **Source Citations**: Shows which documents were used for each response
+- **Markdown Rendering**: AI responses are rendered with full markdown support
+
+**Requirements:**
+- Set `DASHSCOPE_API_KEY` in your `.env` file (get key from [DashScope Console](https://dashscope.console.aliyun.com/))
+
+**How it works:**
+1. User sends a message
+2. If RAG is enabled, relevant documents are retrieved from Elasticsearch using hybrid search
+3. Retrieved context is sent to Qwen LLM along with the user's message
+4. Response is streamed back in real-time with source citations
 
 ### PDF Viewer
 
@@ -291,22 +312,27 @@ python run_search_server.py --host 0.0.0.0 --port 8080 --reload
 ├── src/
 │   ├── __init__.py              # Package exports
 │   ├── document_indexer.py      # Document processing and indexing
+│   ├── document_loader.py       # Multi-format document loading (MD, PDF, DOCX)
 │   ├── hybrid_search.py         # RRF hybrid search (kNN + BM25)
 │   ├── index_mapping.py         # Elasticsearch index management
 │   ├── markdown_loader.py       # Markdown document splitting
-│   ├── search_api.py            # FastAPI search backend
+│   ├── qwen_client.py           # Qwen/DashScope LLM client
+│   ├── search_api.py            # FastAPI search backend + chat API
 │   └── volcengine_embedding.py  # Volcengine Ark embedding client
 ├── frontend/
-│   ├── index.html               # Search interface HTML
+│   ├── index.html               # Search & Chat interface HTML
 │   └── static/
-│       ├── app.js               # Frontend JavaScript
-│       └── styles.css           # Styling
+│       ├── app.js               # Search frontend JavaScript
+│       ├── chat.js              # Chat frontend JavaScript
+│       └── styles.css           # Styling (search + chat)
 ├── docs/                        # Uploaded documents directory
 ├── config/
 │   ├── higress-ai-search.yaml   # Higress plugin configuration
 │   └── setup_elasticsearch.sh   # ES cluster setup script
 ├── tests/
-│   └── test_hybrid_search_properties.py  # Property-based tests
+│   ├── test_hybrid_search_properties.py  # Property-based tests
+│   ├── test_qwen_client.py      # Qwen client unit tests
+│   └── test_chat_api.py         # Chat API integration tests
 ├── docker-compose.yaml          # Elasticsearch & Kibana stack
 ├── load-markdown-into-es.py     # CLI for document ingestion
 ├── run_search_server.py         # Search server launcher
@@ -324,6 +350,36 @@ python run_search_server.py --host 0.0.0.0 --port 8080 --reload
 | `/api/search` | GET | Search documents with hybrid or full-text search |
 | `/api/health` | GET | Check Elasticsearch and embedding service status |
 | `/api/document` | GET | Get full document by source path |
+
+### Chat Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat` | POST | Send a chat message and get AI response with RAG |
+| `/api/chat/stream` | POST | Stream chat response via Server-Sent Events (SSE) |
+
+**Chat Request Body:**
+```json
+{
+  "message": "What is functional programming?",
+  "history": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi! How can I help?"}
+  ],
+  "use_rag": true
+}
+```
+
+**Chat Response:**
+```json
+{
+  "response": "Functional programming is a programming paradigm...",
+  "sources": [
+    {"source": "docs/fp-book.pdf", "title": "FP Book", "content": "..."}
+  ],
+  "model": "qwen-turbo"
+}
+```
 
 ### Document Management Endpoints
 

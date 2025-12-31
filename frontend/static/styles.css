@@ -26,6 +26,11 @@
     --docs-panel-width: 280px;
 }
 
+/* Global utility classes */
+.hidden {
+    display: none !important;
+}
+
 /* Reset */
 *, *::before, *::after {
     box-sizing: border-box;
