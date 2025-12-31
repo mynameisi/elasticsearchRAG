@@ -9,6 +9,7 @@ A Retrieval Augmented Generation (RAG) application featuring hybrid search (sema
 - **Bilingual Support**: Cross-language retrieval between English and Chinese documents
 - **Web Interface**: Modern search UI with document management and AI chat
 - **Streaming Chat**: Real-time AI responses via Server-Sent Events (SSE)
+- **Conversation Management**: Pin, rename, search, and manage chat history with localStorage persistence
 - **Document Deduplication**: SQLRecordManager tracks indexed documents to avoid duplicates
 
 ## Architecture
@@ -239,6 +240,13 @@ Open http://127.0.0.1:8000 in your browser.
 - **Streaming**: Real-time response streaming
 - **Clickable Sources**: Click source citations to view referenced documents
 - **Bilingual**: Ask in English or Chinese, get answers from all documents
+- **Conversation History**: All conversations are automatically saved to browser localStorage
+  - **New Chat**: Start a fresh conversation (current one is saved automatically)
+  - **History Panel**: View all previous conversations with timestamps
+  - **📌 Pin**: Pin important conversations to the top of the list
+  - **✏️ Rename**: Give conversations custom names (preserved across updates)
+  - **🔍 Search**: Full-text search across all conversation titles and messages
+  - **Delete**: Remove individual conversations or clear all history
 
 ### Document Management (Left Panel)
 - **Upload**: Add MD, PDF, or DOCX files
