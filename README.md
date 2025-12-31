@@ -89,22 +89,72 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ## Quick Start
 
-### Step 1: Start Elasticsearch
+### Step 1: Install & Start Elasticsearch
+
+This project uses Docker to run Elasticsearch and Kibana. The `docker-compose.yaml` file in the project root defines the complete setup.
+
+**Start the services:**
 
 ```bash
 docker-compose up -d
 ```
 
-This starts:
-- **Elasticsearch** on `http://localhost:9200` (user: `elastic`, password: `test123`)
-- **Kibana** on `http://localhost:5601`
+This automatically downloads and starts:
+- **Elasticsearch 8.15.0** on `http://localhost:9200`
+- **Kibana 8.15.0** on `http://localhost:5601`
 
-Wait for Elasticsearch to be healthy:
+**Default credentials:**
+- Username: `elastic`
+- Password: `test123`
+
+**Wait for Elasticsearch to be ready:**
 
 ```bash
+# Watch the logs until you see "started"
 docker-compose logs -f elasticsearch
-# Look for "started" message
 ```
+
+Or check health directly:
+
+```bash
+curl -u elastic:test123 http://localhost:9200/_cluster/health?pretty
+```
+
+Expected output when ready:
+
+```json
+{
+  "cluster_name" : "rag-cluster",
+  "status" : "green",
+  ...
+}
+```
+
+**Useful Docker commands:**
+
+```bash
+# Check running containers
+docker-compose ps
+
+# Stop services (preserves data)
+docker-compose stop
+
+# Stop and remove containers (preserves data volume)
+docker-compose down
+
+# Stop and remove everything including data
+docker-compose down -v
+
+# View Elasticsearch logs
+docker-compose logs elasticsearch
+
+# Restart services
+docker-compose restart
+```
+
+**Access Kibana (optional):**
+
+Open http://localhost:5601 and login with `elastic` / `test123` to explore your data visually.
 
 ### Step 2: Install Python Dependencies
 
