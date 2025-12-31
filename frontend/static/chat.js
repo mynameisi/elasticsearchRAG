@@ -24,10 +24,13 @@ function initChat() {
     // Prevent multiple initializations
     if (chatInitialized) return;
     chatInitialized = true;
+    
     // DOM Elements - Chat
     chatElements.tabSearch = document.getElementById('tab-search');
     chatElements.tabChat = document.getElementById('tab-chat');
-    chatElements.searchMain = document.querySelector('.main:not(.chat-main)');
+    // Find search main - it's the first main that's not chat-main
+    const allMains = document.querySelectorAll('.main');
+    chatElements.searchMain = Array.from(allMains).find(m => !m.classList.contains('chat-main'));
     chatElements.chatMain = document.getElementById('chat-main');
     chatElements.chatMessages = document.getElementById('chat-messages');
     chatElements.chatInput = document.getElementById('chat-input');
@@ -43,12 +46,24 @@ function initChat() {
     
     // Initialize event listeners
     if (chatElements.tabSearch && chatElements.tabChat) {
-        chatElements.tabSearch.addEventListener('click', () => switchTab('search'));
-        chatElements.tabChat.addEventListener('click', () => switchTab('chat'));
+        chatElements.tabSearch.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            switchTab('search');
+        });
+        chatElements.tabChat.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            switchTab('chat');
+        });
     }
     
     if (chatElements.chatSend) {
-        chatElements.chatSend.addEventListener('click', sendChatMessage);
+        chatElements.chatSend.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            sendChatMessage();
+        });
     }
     
     if (chatElements.chatInput) {
