@@ -2,22 +2,15 @@
 // Chat Functions
 // ==========================================
 
-// Wait for DOM to be ready
-(function() {
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initChat);
-    } else {
-        initChat();
-    }
-})();
-
 // Helper functions (in case they're not available from app.js)
 function escapeHtml(text) {
-    if (typeof window.escapeHtml === 'function') {
+    if (!text) return '';
+    // Use global escapeHtml if available, otherwise use our own
+    if (typeof window !== 'undefined' && typeof window.escapeHtml === 'function') {
         return window.escapeHtml(text);
     }
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = String(text);
     return div.innerHTML;
 }
 
@@ -25,8 +18,12 @@ function escapeHtml(text) {
 let chatHistory = [];
 let currentStreamingMessage = null;
 let chatElements = {};
+let chatInitialized = false;
 
 function initChat() {
+    // Prevent multiple initializations
+    if (chatInitialized) return;
+    chatInitialized = true;
     // DOM Elements - Chat
     chatElements.tabSearch = document.getElementById('tab-search');
     chatElements.tabChat = document.getElementById('tab-chat');
@@ -68,6 +65,16 @@ function initChat() {
         });
     }
 }
+
+// Wait for DOM to be ready
+(function() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initChat);
+    } else {
+        // Use setTimeout to ensure DOM is fully ready
+        setTimeout(initChat, 0);
+    }
+})();
 
 function switchTab(tabName) {
     const { tabSearch, tabChat, searchMain, chatMain, chatInput } = chatElements;
