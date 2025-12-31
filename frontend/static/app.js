@@ -1449,6 +1449,77 @@ function escapeHtml(text) {
 }
 
 // ==========================================
+// Global Functions (for cross-module access)
+// ==========================================
+
+/**
+ * Open a document with highlighting - called from chat.js when clicking sources
+ * @param {string} filename - The filename to open
+ * @param {string} fileType - File type (pdf, md, docx)
+ * @param {number|null} page - Page number for PDFs (0-indexed)
+ * @param {string} highlightText - Text to highlight/search for
+ */
+async function openDocumentWithHighlight(filename, fileType, page, highlightText) {
+    if (!filename) {
+        console.error('openDocumentWithHighlight: filename is required');
+        return;
+    }
+    
+    // Set article panel title
+    articleTitle.textContent = filename;
+    articleContent.innerHTML = '<div class="docs-loading"><div class="spinner small"></div><span>Loading...</span></div>';
+    
+    // Open panel
+    articlePanel.classList.add('open');
+    appContainer.classList.add('panel-open');
+    panelOverlay.classList.add('visible');
+    
+    // Convert page to 1-indexed for display
+    const targetPage = page !== null && page !== undefined ? page + 1 : null;
+    
+    try {
+        if (fileType === 'pdf') {
+            await renderPDF(filename, highlightText, targetPage);
+        } else if (fileType === 'docx') {
+            await renderDOCX(filename, highlightText);
+        } else {
+            // Markdown and other text files
+            const response = await fetch(`${API_BASE}/documents/${encodeURIComponent(filename)}`);
+            if (!response.ok) throw new Error('Failed to load document');
+            
+            const data = await response.json();
+            const renderedHtml = renderMarkdownWithHighlightText(data.content, highlightText);
+            articleContent.innerHTML = renderedHtml;
+            
+            // Scroll to first highlight
+            setTimeout(() => {
+                const firstHighlight = articleContent.querySelector('.search-highlight, .highlight-section');
+                if (firstHighlight) {
+                    firstHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
+        }
+    } catch (e) {
+        articleContent.innerHTML = `<p class="error">Failed to load document: ${e.message}</p>`;
+    }
+}
+
+// Helper to render markdown with text highlighting
+function renderMarkdownWithHighlightText(content, highlightText) {
+    marked.setOptions({ breaks: true, gfm: true });
+    let html = marked.parse(content);
+    
+    if (highlightText) {
+        html = highlightSearchTerms(html, highlightText);
+    }
+    
+    return html;
+}
+
+// Make function available globally for chat.js
+window.openDocumentWithHighlight = openDocumentWithHighlight;
+
+// ==========================================
 // Event Listeners
 // ==========================================
 

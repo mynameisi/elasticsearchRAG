@@ -702,6 +702,9 @@ class ChatSource(BaseModel):
     title: str
     content: str
     score: Optional[float] = None
+    file_type: Optional[str] = None
+    source_filename: Optional[str] = None
+    page: Optional[int] = None  # For PDFs, 0-indexed page number
 
 
 class ChatResponse(BaseModel):
@@ -776,6 +779,9 @@ async def chat(request: ChatRequest):
                     title=result.metadata.get("source_filename", "Document"),
                     content=result.content[:200] + "..." if len(result.content) > 200 else result.content,
                     score=result.score,
+                    file_type=result.metadata.get("file_type"),
+                    source_filename=result.metadata.get("source_filename"),
+                    page=result.metadata.get("page"),  # 0-indexed for PDFs
                 )
                 for result in search_results
             ]
@@ -865,6 +871,9 @@ async def chat_stream(request: ChatRequest):
                     title=result.metadata.get("source_filename", "Document"),
                     content=result.content[:200] + "..." if len(result.content) > 200 else result.content,
                     score=result.score,
+                    file_type=result.metadata.get("file_type"),
+                    source_filename=result.metadata.get("source_filename"),
+                    page=result.metadata.get("page"),  # 0-indexed for PDFs
                 )
                 for result in search_results
             ]

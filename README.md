@@ -264,6 +264,16 @@ The Chat tab provides an AI-powered conversational interface using RAG:
 - **Markdown Rendering**: AI responses are rendered with full markdown support
 - **Bilingual Support**: Works with both English and Chinese documents/queries
 
+**Clickable Source Citations:**
+
+Each chat response includes clickable source references that link directly to the referenced documents:
+
+- **Click to View**: Click any source citation to open the document in the side panel
+- **Page Navigation**: For PDFs, automatically navigates to the specific page containing the reference
+- **Text Highlighting**: Search terms are highlighted in the opened document (same as search results)
+- **Source Metadata**: Shows file type icon, page number (for PDFs), and content preview
+- **Inline & Panel Sources**: Both inline source badges and the sources panel are clickable
+
 **Requirements:**
 - Set `DASHSCOPE_API_KEY` in your `.env` file (get key from [DashScope Console](https://dashscope.console.aliyun.com/))
 
@@ -271,7 +281,8 @@ The Chat tab provides an AI-powered conversational interface using RAG:
 1. User sends a message (in English or Chinese)
 2. If RAG is enabled, bilingual search retrieves relevant documents from ALL sources regardless of language
 3. Retrieved context is sent to Qwen LLM with instructions to respond in the user's language
-4. Response is streamed back in real-time with source citations
+4. Response is streamed back in real-time with clickable source citations
+5. Click any source to view the original document with the relevant section highlighted
 
 ### Bilingual Search
 
@@ -298,6 +309,16 @@ The web interface includes a built-in PDF viewer powered by PDF.js:
 - **Text Layer**: Invisible text layer enables search term highlighting in PDFs
 - **Responsive Canvas**: PDF renders at actual size with CSS-controlled display dimensions
 - **Bidirectional Scrolling**: Wide PDFs can be scrolled horizontally in both directions (left and right) when zoomed in
+
+### PDF Search Highlighting
+
+When clicking on a PDF search result, the viewer provides intelligent navigation:
+
+- **Jump to Page**: Automatically navigates to the specific page containing the search match (page number stored in search index)
+- **Search Term Highlighting**: Yellow highlight boxes appear over text chunks containing the search terms
+- **Visual Indicator**: "📍 Page X" badge shown in search result cards for PDF results
+- **Highlight Info Bar**: Shows "🔍 Highlighting search matches" when viewing from a search result
+- **Accurate Positioning**: Highlights are positioned using PDF.js viewport coordinate conversion for proper alignment
 
 ### Document Management (Left Panel)
 
@@ -389,7 +410,15 @@ python run_search_server.py --host 0.0.0.0 --port 8080 --reload
 {
   "response": "Functional programming is a programming paradigm...",
   "sources": [
-    {"source": "docs/fp-book.pdf", "title": "FP Book", "content": "..."}
+    {
+      "source": "docs/fp-book.pdf",
+      "title": "FP Book",
+      "content": "Functional programming is a paradigm that treats computation...",
+      "score": 0.85,
+      "file_type": "pdf",
+      "source_filename": "fp-book.pdf",
+      "page": 94
+    }
   ],
   "model": "qwen-turbo"
 }

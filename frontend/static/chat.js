@@ -162,6 +162,9 @@ async function streamChatResponse(message, useRag) {
         throw new Error('Chat messages container not found');
     }
     
+    // Store the current query for source highlighting
+    window.chatSearchQuery = message;
+    
     const response = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,21 +222,33 @@ async function streamChatResponse(message, useRag) {
                 
                 // Display sources if available
                 if (sources.length > 0) {
-                    displayChatSources(sources);
+                    displayChatSources(sources, message);
                     const sourcesDiv = document.createElement('div');
                     sourcesDiv.className = 'chat-message-sources';
                     sourcesDiv.innerHTML = `
                         <div class="sources-header">📚 Sources:</div>
                         <div class="sources-list">
-                            ${sources.map((s, i) => `
-                                <div class="source-item" title="${escapeHtml(s.content || '')}">
-                                    <span class="source-index">${i + 1}</span>
-                                    <span class="source-title">${escapeHtml(s.title || s.source || 'Unknown')}</span>
-                                </div>
-                            `).join('')}
+                            ${sources.map((s, i) => {
+                                const pageInfo = s.page !== null && s.page !== undefined ? ` (p.${s.page + 1})` : '';
+                                return `
+                                    <div class="source-item source-clickable" data-source-index="${i}" title="Click to view">
+                                        <span class="source-index">${i + 1}</span>
+                                        <span class="source-title">${escapeHtml(s.title || s.source || 'Unknown')}${pageInfo}</span>
+                                        <span class="source-arrow">→</span>
+                                    </div>
+                                `;
+                            }).join('')}
                         </div>
                     `;
                     messageDiv.appendChild(sourcesDiv);
+                    
+                    // Add click handlers for inline sources
+                    sourcesDiv.querySelectorAll('.source-clickable').forEach(item => {
+                        item.addEventListener('click', () => {
+                            const index = parseInt(item.dataset.sourceIndex);
+                            openSourceDocument(index);
+                        });
+                    });
                 }
                 
                 // Render markdown
@@ -270,7 +285,7 @@ async function streamChatResponse(message, useRag) {
     }
 }
 
-function displayChatSources(sources) {
+function displayChatSources(sources, searchQuery = '') {
     if (!chatSources) return;
     
     if (!sources || sources.length === 0) {
@@ -278,22 +293,77 @@ function displayChatSources(sources) {
         return;
     }
     
+    // Store sources globally for click handlers
+    window.chatSourcesData = sources;
+    window.chatSearchQuery = searchQuery;
+    
     chatSources.innerHTML = `
         <div class="sources-panel">
             <div class="sources-panel-header">📚 Sources (${sources.length})</div>
             <div class="sources-panel-list">
-                ${sources.map((s, i) => `
-                    <div class="source-panel-item" title="${escapeHtml(s.content || '')}">
-                        <span class="source-panel-index">${i + 1}</span>
-                        <div class="source-panel-content">
-                            <div class="source-panel-title">${escapeHtml(s.title || s.source || 'Unknown')}</div>
-                            <div class="source-panel-snippet">${escapeHtml((s.content || '').substring(0, 100))}...</div>
+                ${sources.map((s, i) => {
+                    const fileIcon = getFileIcon(s.file_type);
+                    const pageInfo = s.page !== null && s.page !== undefined ? ` • Page ${s.page + 1}` : '';
+                    return `
+                        <div class="source-panel-item source-clickable" 
+                             data-source-index="${i}"
+                             title="Click to view: ${escapeHtml(s.content || '')}">
+                            <span class="source-panel-index">${i + 1}</span>
+                            <div class="source-panel-content">
+                                <div class="source-panel-title">
+                                    <span class="source-file-icon">${fileIcon}</span>
+                                    ${escapeHtml(s.title || s.source || 'Unknown')}
+                                </div>
+                                <div class="source-panel-meta">${escapeHtml(s.file_type?.toUpperCase() || '')}${pageInfo}</div>
+                                <div class="source-panel-snippet">${escapeHtml((s.content || '').substring(0, 100))}...</div>
+                            </div>
+                            <span class="source-panel-arrow">→</span>
                         </div>
-                    </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
         </div>
     `;
+    
+    // Add click handlers
+    chatSources.querySelectorAll('.source-clickable').forEach(item => {
+        item.addEventListener('click', () => {
+            const index = parseInt(item.dataset.sourceIndex);
+            openSourceDocument(index);
+        });
+    });
+}
+
+// File type icons
+function getFileIcon(fileType) {
+    const icons = {
+        'md': '📝',
+        'pdf': '📕',
+        'docx': '📘',
+    };
+    return icons[fileType] || '📄';
+}
+
+// Open source document with highlighting
+function openSourceDocument(index) {
+    const sources = window.chatSourcesData;
+    const searchQuery = window.chatSearchQuery;
+    
+    if (!sources || !sources[index]) return;
+    
+    const source = sources[index];
+    const filename = source.source_filename || source.title;
+    const fileType = source.file_type;
+    const page = source.page;
+    const content = source.content;
+    
+    // Call the global function to open document (defined in app.js)
+    if (typeof window.openDocumentWithHighlight === 'function') {
+        window.openDocumentWithHighlight(filename, fileType, page, searchQuery || content);
+    } else {
+        console.error('openDocumentWithHighlight function not available');
+        showToast('Unable to open document', 'error');
+    }
 }
 
 // Initialize chat functionality
