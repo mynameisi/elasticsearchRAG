@@ -313,6 +313,89 @@ def search_documents(
     )
 
 
+def bilingual_search(
+    es_client: Elasticsearch,
+    index_name: str,
+    query: str,
+    embedding_client: Optional[Any] = None,
+    top_k: int = 5,
+) -> List[SearchResult]:
+    """
+    Perform bilingual search to get results from both language sources.
+    
+    This function performs TWO searches to ensure cross-language coverage:
+    1. Hybrid search (semantic + BM25) - biased towards query language
+    2. Pure full-text search with broader matching - catches cross-language terms
+    
+    Results are deduplicated and merged.
+    
+    Args:
+        es_client: Elasticsearch client instance
+        index_name: Name of the Elasticsearch index to search
+        query: The search query string
+        embedding_client: Optional embedding client for vector search
+        top_k: Number of top results to return (default: 5)
+        
+    Returns:
+        List of SearchResult objects from both language sources
+    """
+    seen_ids = set()
+    all_results = []
+    
+    # Search 1: Hybrid search (semantic + BM25)
+    hybrid_results = search_documents(
+        es_client=es_client,
+        index_name=index_name,
+        query=query,
+        embedding_client=embedding_client,
+        top_k=top_k,
+    )
+    
+    for r in hybrid_results:
+        doc_id = r.metadata.get("_id")
+        if doc_id not in seen_ids:
+            seen_ids.add(doc_id)
+            all_results.append(r)
+    
+    # Search 2: Pure full-text search (language-agnostic for shared terms)
+    # Use match_all with minimum_should_match for broader recall
+    fulltext_query = {
+        "size": top_k,
+        "query": {
+            "bool": {
+                "should": [
+                    {"match": {"content": {"query": query, "fuzziness": "AUTO"}}},
+                    {"match": {"content": {"query": query, "operator": "or", "minimum_should_match": "30%"}}},
+                ],
+                "minimum_should_match": 1
+            }
+        },
+        "_source": {"excludes": ["embedding"]}
+    }
+    
+    try:
+        response = es_client.search(index=index_name, body=fulltext_query)
+        for hit in response.get("hits", {}).get("hits", []):
+            doc_id = hit.get("_id")
+            if doc_id not in seen_ids:
+                seen_ids.add(doc_id)
+                source = hit.get("_source", {})
+                content = source.get("content", "")
+                metadata = {k: v for k, v in source.items() if k not in ("content", "embedding")}
+                metadata["_id"] = doc_id
+                metadata["_index"] = hit.get("_index")
+                all_results.append(SearchResult(
+                    content=content,
+                    metadata=metadata,
+                    score=hit.get("_score"),
+                ))
+    except Exception as e:
+        print(f"Full-text search fallback failed: {e}")
+    
+    # Return top_k results
+    return all_results[:top_k * 2]  # Return more for better diversity
+
+
 def get_context_for_rag(
     es_client: Elasticsearch,
     index_name: str,
@@ -320,6 +403,7 @@ def get_context_for_rag(
     embedding_client: Optional[Any] = None,
     top_k: int = 3,
     separator: str = "\n\n---\n\n",
+    bilingual: bool = True,
 ) -> str:
     """
     Get concatenated context from search results for RAG prompts.
@@ -334,6 +418,7 @@ def get_context_for_rag(
         embedding_client: Optional embedding client for vector search
         top_k: Number of top results to include (default: 3)
         separator: String to use between document contents (default: newlines with separator)
+        bilingual: If True, use bilingual search for cross-language coverage (default: True)
         
     Returns:
         Concatenated content from top search results
@@ -342,13 +427,22 @@ def get_context_for_rag(
         >>> context = get_context_for_rag(es, "my_index", "vacation policy", emb)
         >>> prompt = f"Based on the following context:\\n{context}\\n\\nAnswer: {question}"
     """
-    results = search_documents(
-        es_client=es_client,
-        index_name=index_name,
-        query=query,
-        embedding_client=embedding_client,
-        top_k=top_k,
-    )
+    if bilingual:
+        results = bilingual_search(
+            es_client=es_client,
+            index_name=index_name,
+            query=query,
+            embedding_client=embedding_client,
+            top_k=top_k,
+        )
+    else:
+        results = search_documents(
+            es_client=es_client,
+            index_name=index_name,
+            query=query,
+            embedding_client=embedding_client,
+            top_k=top_k,
+        )
     
     if not results:
         return ""

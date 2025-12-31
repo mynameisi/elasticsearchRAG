@@ -23,7 +23,7 @@ from src.index_mapping import get_elasticsearch_client
 from src.volcengine_embedding import get_embedding_client, VolcengineEmbeddingClient
 from src.document_loader import load_document, get_supported_extensions, SUPPORTED_EXTENSIONS
 from src.qwen_client import QwenClient, get_qwen_client, ChatMessage as QwenChatMessage
-from src.hybrid_search import get_context_for_rag, search_documents
+from src.hybrid_search import get_context_for_rag, search_documents, bilingual_search
 
 
 app = FastAPI(title="RAG Search API", version="1.0.0")
@@ -751,22 +751,23 @@ async def chat(request: ChatRequest):
     # Get RAG context if enabled
     if request.use_rag and es_client is not None and embedding_client is not None:
         try:
-            # Get context from documents
+            # Get context from documents (bilingual search for cross-language coverage)
             context = get_context_for_rag(
                 es_client=es_client,
                 index_name="rag_documents",
                 query=request.message,
                 embedding_client=embedding_client,
-                top_k=3,
+                top_k=5,
+                bilingual=True,
             )
             
-            # Get source documents for citation
-            search_results = search_documents(
+            # Get source documents for citation (bilingual search)
+            search_results = bilingual_search(
                 es_client=es_client,
                 index_name="rag_documents",
                 query=request.message,
                 embedding_client=embedding_client,
-                top_k=3,
+                top_k=5,
             )
             
             sources = [
@@ -840,20 +841,22 @@ async def chat_stream(request: ChatRequest):
     
     if request.use_rag and es_client is not None and embedding_client is not None:
         try:
+            # Bilingual search for cross-language coverage
             context = get_context_for_rag(
                 es_client=es_client,
                 index_name="rag_documents",
                 query=request.message,
                 embedding_client=embedding_client,
-                top_k=3,
+                top_k=5,
+                bilingual=True,
             )
             
-            search_results = search_documents(
+            search_results = bilingual_search(
                 es_client=es_client,
                 index_name="rag_documents",
                 query=request.message,
                 embedding_client=embedding_client,
-                top_k=3,
+                top_k=5,
             )
             
             sources = [
