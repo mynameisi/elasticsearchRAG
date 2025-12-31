@@ -262,15 +262,29 @@ The Chat tab provides an AI-powered conversational interface using RAG:
 - **Streaming Responses**: Real-time streaming via Server-Sent Events (SSE)
 - **Source Citations**: Shows which documents were used for each response
 - **Markdown Rendering**: AI responses are rendered with full markdown support
+- **Bilingual Support**: Works with both English and Chinese documents/queries
 
 **Requirements:**
 - Set `DASHSCOPE_API_KEY` in your `.env` file (get key from [DashScope Console](https://dashscope.console.aliyun.com/))
 
 **How it works:**
-1. User sends a message
-2. If RAG is enabled, relevant documents are retrieved from Elasticsearch using hybrid search
-3. Retrieved context is sent to Qwen LLM along with the user's message
+1. User sends a message (in English or Chinese)
+2. If RAG is enabled, bilingual search retrieves relevant documents from ALL sources regardless of language
+3. Retrieved context is sent to Qwen LLM with instructions to respond in the user's language
 4. Response is streamed back in real-time with source citations
+
+### Bilingual Search
+
+The RAG system supports **cross-language retrieval** - you can ask questions in any language and get answers from all your documents:
+
+- **Dual Search Strategy**: Combines semantic search with full-text search for cross-language coverage
+- **Language-Agnostic Retrieval**: Chinese queries can find English documents and vice versa
+- **Automatic Response Language**: AI responds in the same language as your question
+- **Mixed Source Synthesis**: Combines information from both Chinese and English sources
+
+Example:
+- Ask "What is functional programming?" → Gets context from both English FP book AND Chinese documents
+- Ask "应该问的三个问题" → Gets context from both Chinese AND English sources
 
 ### PDF Viewer
 
@@ -478,6 +492,31 @@ context = get_context_for_rag(
     query="vacation policy",
     embedding_client=emb,
     top_k=3
+)
+```
+
+### Bilingual Search (Cross-Language)
+
+```python
+from src.hybrid_search import bilingual_search, get_context_for_rag
+
+# Bilingual search - finds documents in ALL languages regardless of query language
+results = bilingual_search(
+    es_client=es,
+    index_name="rag_documents",
+    query="functional programming",  # English query finds Chinese docs too
+    embedding_client=emb,
+    top_k=5
+)
+
+# Get bilingual RAG context (enabled by default)
+context = get_context_for_rag(
+    es_client=es,
+    index_name="rag_documents",
+    query="什么是函数式编程",  # Chinese query finds English docs too
+    embedding_client=emb,
+    top_k=5,
+    bilingual=True  # Default: True
 )
 ```
 
