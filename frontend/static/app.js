@@ -34,6 +34,18 @@ const docsList = document.getElementById('docs-list');
 const docsEmpty = document.getElementById('docs-empty');
 const toastContainer = document.getElementById('toast-container');
 
+// DOM Elements - Chat
+const tabSearch = document.getElementById('tab-search');
+const tabChat = document.getElementById('tab-chat');
+const searchMain = document.querySelector('.main:not(.chat-main)');
+const chatMain = document.getElementById('chat-main');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+const chatRagToggle = document.getElementById('chat-rag-toggle');
+const chatLoading = document.getElementById('chat-loading');
+const chatSources = document.getElementById('chat-sources');
+
 // API base URL
 const API_BASE = '/api';
 
