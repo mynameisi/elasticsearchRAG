@@ -42,6 +42,51 @@ A Retrieval Augmented Generation (RAG) application featuring hybrid search (sema
 - **Python** 3.10+
 - **uv** (recommended) for Python package management
 
+### Install Docker
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install --cask docker
+
+# Then open Docker Desktop from Applications
+```
+
+Or download [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) directly.
+
+**Ubuntu/Debian:**
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sudo sh
+
+# Add your user to the docker group (logout/login required)
+sudo usermod -aG docker $USER
+
+# Start Docker service
+sudo systemctl start docker
+sudo systemctl enable docker
+```
+
+**Windows:**
+
+Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
+
+**Verify installation:**
+```bash
+docker --version
+docker compose version
+```
+
+### Install uv (Python Package Manager)
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
 ## Quick Start
 
 ### Step 1: Start Elasticsearch
