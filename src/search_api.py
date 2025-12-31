@@ -16,12 +16,14 @@ from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from elasticsearch import Elasticsearch
 
 from src.index_mapping import get_elasticsearch_client
 from src.volcengine_embedding import get_embedding_client, VolcengineEmbeddingClient
 from src.document_loader import load_document, get_supported_extensions, SUPPORTED_EXTENSIONS
+from src.qwen_client import QwenClient, get_qwen_client, ChatMessage as QwenChatMessage
+from src.hybrid_search import get_context_for_rag, search_documents
 
 
 app = FastAPI(title="RAG Search API", version="1.0.0")
@@ -38,6 +40,7 @@ app.add_middleware(
 # Global clients (initialized on startup)
 es_client: Optional[Elasticsearch] = None
 embedding_client: Optional[VolcengineEmbeddingClient] = None
+qwen_client: Optional[QwenClient] = None
 
 # Documents directory
 DOCS_DIR = Path("docs")
@@ -203,7 +206,7 @@ def create_snippet(content: str, highlights: List[str], max_length: int = 300) -
 @app.on_event("startup")
 async def startup():
     """Initialize clients on startup."""
-    global es_client, embedding_client
+    global es_client, embedding_client, qwen_client
     
     try:
         es_client = get_elasticsearch_client()
@@ -219,6 +222,12 @@ async def startup():
     except ValueError:
         print("Warning: Embedding client not configured (missing API key or endpoint)")
         embedding_client = None
+    
+    try:
+        qwen_client = get_qwen_client()
+    except ValueError:
+        print("Warning: Qwen client not configured (missing DASHSCOPE_API_KEY)")
+        qwen_client = None
 
 
 @app.get("/api/search", response_model=SearchResponse)
@@ -661,6 +670,236 @@ async def reindex_documents():
 
 # Serve static files
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+
+
+# ==========================================
+# Chat API Endpoints
+# ==========================================
+
+class ChatHistoryItem(BaseModel):
+    """A single message in chat history."""
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """Request for chat endpoint."""
+    message: str
+    history: List[ChatHistoryItem] = []
+    use_rag: bool = True
+    
+    @validator('message')
+    def validate_message(cls, v):
+        """Validate that message is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Message cannot be empty")
+        return v
+
+
+class ChatSource(BaseModel):
+    """Source document used in RAG."""
+    source: str
+    title: str
+    content: str
+    score: Optional[float] = None
+
+
+class ChatResponse(BaseModel):
+    """Response from chat endpoint."""
+    response: str
+    sources: List[ChatSource] = []
+    model: str
+
+
+RAG_SYSTEM_PROMPT = """You are a helpful assistant that answers questions based on the provided context from our knowledge base.
+
+Context from knowledge base:
+{context}
+
+Conversation history and current question will follow.
+If the answer cannot be found in the context, acknowledge this and try to help based on general knowledge while noting that the information is not from the knowledge base."""
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """
+    Chat with AI using RAG (Retrieval Augmented Generation).
+    
+    Retrieves relevant context from Elasticsearch and sends it to Qwen
+    for generating contextual responses.
+    """
+    if qwen_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen client not available (missing DASHSCOPE_API_KEY)"
+        )
+    
+    # Build messages for Qwen
+    messages = []
+    context = ""
+    sources = []
+    
+    # Get RAG context if enabled
+    if request.use_rag and es_client is not None and embedding_client is not None:
+        try:
+            # Get context from documents
+            context = get_context_for_rag(
+                es_client=es_client,
+                index_name="rag_documents",
+                query=request.message,
+                embedding_client=embedding_client,
+                top_k=3,
+            )
+            
+            # Get source documents for citation
+            search_results = search_documents(
+                es_client=es_client,
+                index_name="rag_documents",
+                query=request.message,
+                embedding_client=embedding_client,
+                top_k=3,
+            )
+            
+            sources = [
+                ChatSource(
+                    source=result.metadata.get("source", "unknown"),
+                    title=result.metadata.get("source_filename", "Document"),
+                    content=result.content[:200] + "..." if len(result.content) > 200 else result.content,
+                    score=result.score,
+                )
+                for result in search_results
+            ]
+            
+            # Add system prompt with context
+            if context:
+                messages.append(QwenChatMessage(
+                    role="system",
+                    content=RAG_SYSTEM_PROMPT.format(context=context)
+                ))
+        except Exception as e:
+            print(f"RAG context retrieval failed: {e}")
+            # Continue without RAG context
+    
+    # Add conversation history
+    for hist_item in request.history:
+        messages.append(QwenChatMessage(
+            role=hist_item.role,
+            content=hist_item.content
+        ))
+    
+    # Add current user message
+    messages.append(QwenChatMessage(
+        role="user",
+        content=request.message
+    ))
+    
+    # Get response from Qwen
+    try:
+        qwen_response = qwen_client.chat(messages)
+        return ChatResponse(
+            response=qwen_response.content,
+            sources=sources,
+            model=qwen_response.model or "qwen-turbo"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chat failed: {str(e)}"
+        )
+
+
+from fastapi.responses import StreamingResponse
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Stream chat responses using Server-Sent Events (SSE).
+    
+    Same as /api/chat but streams the response in real-time.
+    """
+    if qwen_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen client not available (missing DASHSCOPE_API_KEY)"
+        )
+    
+    # Build messages (same as non-streaming)
+    messages = []
+    context = ""
+    sources = []
+    
+    if request.use_rag and es_client is not None and embedding_client is not None:
+        try:
+            context = get_context_for_rag(
+                es_client=es_client,
+                index_name="rag_documents",
+                query=request.message,
+                embedding_client=embedding_client,
+                top_k=3,
+            )
+            
+            search_results = search_documents(
+                es_client=es_client,
+                index_name="rag_documents",
+                query=request.message,
+                embedding_client=embedding_client,
+                top_k=3,
+            )
+            
+            sources = [
+                ChatSource(
+                    source=result.metadata.get("source", "unknown"),
+                    title=result.metadata.get("source_filename", "Document"),
+                    content=result.content[:200] + "..." if len(result.content) > 200 else result.content,
+                    score=result.score,
+                )
+                for result in search_results
+            ]
+            
+            if context:
+                messages.append(QwenChatMessage(
+                    role="system",
+                    content=RAG_SYSTEM_PROMPT.format(context=context)
+                ))
+        except Exception as e:
+            print(f"RAG context retrieval failed: {e}")
+    
+    for hist_item in request.history:
+        messages.append(QwenChatMessage(
+            role=hist_item.role,
+            content=hist_item.content
+        ))
+    
+    messages.append(QwenChatMessage(
+        role="user",
+        content=request.message
+    ))
+    
+    def generate():
+        """Generator for SSE streaming."""
+        try:
+            # Send sources first as JSON
+            import json
+            yield f"data: {json.dumps({'type': 'sources', 'sources': [s.dict() for s in sources]})}\n\n"
+            
+            # Stream response chunks
+            for chunk in qwen_client.chat_stream(messages):
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            
+            # Send done signal
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.get("/")
