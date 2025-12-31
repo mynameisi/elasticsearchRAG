@@ -591,8 +591,19 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 
 
 @app.post("/api/reindex")
-async def reindex_documents():
-    """Reindex all documents in the docs directory (MD, PDF, DOCX)."""
+async def reindex_documents(
+    force: bool = Query(False, description="Force full reindex, bypassing cache")
+):
+    """
+    Reindex all documents in the docs directory (MD, PDF, DOCX).
+    
+    Uses content-based caching to skip unchanged documents and avoid
+    regenerating embeddings for content that hasn't changed.
+    
+    Args:
+        force: If True, deletes cache and reindexes everything from scratch.
+               If False (default), uses incremental indexing.
+    """
     if es_client is None:
         raise HTTPException(status_code=503, detail="Elasticsearch not available")
     
@@ -618,16 +629,23 @@ async def reindex_documents():
                 print(f"Error loading {file_path}: {e}")
     
     if not all_docs:
-        return {"added": 0, "deleted": 0, "message": "No documents to index"}
+        return {"added": 0, "deleted": 0, "skipped": 0, "message": "No documents to index"}
     
-    # Recreate index and reindex
     try:
-        create_index(es_client, "rag_documents", delete_if_exists=True)
-        
-        # Clear record manager
-        import os
-        if os.path.exists("record_manager.db"):
-            os.remove("record_manager.db")
+        if force:
+            # Force mode: delete everything and start fresh
+            print("Force reindex: clearing cache and recreating index...")
+            create_index(es_client, "rag_documents", delete_if_exists=True)
+            
+            # Clear record manager
+            import os
+            if os.path.exists("record_manager.db"):
+                os.remove("record_manager.db")
+        else:
+            # Incremental mode: ensure index exists but don't delete
+            if not es_client.indices.exists(index="rag_documents"):
+                create_index(es_client, "rag_documents", delete_if_exists=False)
+            print("Incremental reindex: using content cache to skip unchanged documents...")
         
         result = index_documents(
             documents=all_docs,
@@ -641,7 +659,8 @@ async def reindex_documents():
             "added": result.num_added,
             "deleted": result.num_deleted,
             "skipped": result.num_skipped,
-            "total_files": len(seen_files)
+            "total_files": len(seen_files),
+            "cached": not force
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reindex failed: {str(e)}")

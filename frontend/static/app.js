@@ -1080,13 +1080,18 @@ async function uploadFiles(files) {
     }
 }
 
-async function reindexDocuments() {
+async function reindexDocuments(force = false) {
     reindexButton.classList.add('loading');
     reindexButton.disabled = true;
-    showToast('Reindexing documents...', 'info');
+    
+    const message = force 
+        ? 'Force reindexing all documents (ignoring cache)...' 
+        : 'Reindexing documents (using cache for unchanged content)...';
+    showToast(message, 'info');
     
     try {
-        const response = await fetch(`${API_BASE}/reindex`, {
+        const url = force ? `${API_BASE}/reindex?force=true` : `${API_BASE}/reindex`;
+        const response = await fetch(url, {
             method: 'POST'
         });
         
@@ -1096,7 +1101,18 @@ async function reindexDocuments() {
         }
         
         const data = await response.json();
-        showToast(`Reindexed: ${data.added} added, ${data.deleted} deleted`, 'success');
+        
+        // Build detailed status message
+        let statusParts = [];
+        if (data.added > 0) statusParts.push(`${data.added} added`);
+        if (data.skipped > 0) statusParts.push(`${data.skipped} cached`);
+        if (data.deleted > 0) statusParts.push(`${data.deleted} removed`);
+        
+        const statusMsg = statusParts.length > 0 
+            ? statusParts.join(', ') 
+            : 'No changes needed';
+        
+        showToast(`Reindex complete: ${statusMsg}`, 'success');
         loadDocuments();
     } catch (e) {
         showToast(`Reindex failed: ${e.message}`, 'error');
@@ -1542,7 +1558,11 @@ fileUpload.addEventListener('change', (e) => {
     e.target.value = '';
 });
 
-reindexButton.addEventListener('click', reindexDocuments);
+// Shift+Click for force reindex (bypass cache), normal click uses cache
+reindexButton.addEventListener('click', (e) => {
+    reindexDocuments(e.shiftKey);
+});
+reindexButton.title = 'Reindex all documents (Shift+Click to force full reindex)';
 deleteSelected.addEventListener('click', deleteSelectedDocuments);
 
 // Keyboard shortcuts

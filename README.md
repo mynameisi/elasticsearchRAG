@@ -252,7 +252,16 @@ Open http://127.0.0.1:8000 in your browser.
 - **Upload**: Add MD, PDF, or DOCX files
 - **View**: Click to preview any document
 - **Delete**: Single delete (hover → trash) or batch delete (checkboxes)
-- **Reindex**: Re-process all documents with embeddings
+- **Reindex**: Re-process documents with smart caching
+  - **Click**: Incremental reindex - skips unchanged documents (fast)
+  - **Shift+Click**: Force full reindex - rebuilds everything from scratch
+
+#### Reindex Caching
+The reindex feature uses content-based caching to avoid regenerating embeddings for unchanged documents:
+- Each document chunk is hashed (SHA-256) based on content + metadata
+- Unchanged chunks are skipped, saving API calls and time
+- Only new or modified content triggers embedding generation
+- Deleted documents are automatically removed from the index
 
 ## CLI Reference
 
@@ -375,7 +384,8 @@ print(response.content)
 | `/api/documents/{filename}` | GET | Get document content |
 | `/api/documents/{filename}` | DELETE | Delete document |
 | `/api/documents/upload` | POST | Upload documents |
-| `/api/reindex` | POST | Reindex all documents |
+| `/api/reindex` | POST | Reindex documents (cached) |
+| `/api/reindex?force=true` | POST | Force full reindex (bypass cache) |
 
 ## Project Structure
 
