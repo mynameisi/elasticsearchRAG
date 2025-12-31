@@ -307,6 +307,17 @@ python run_search_server.py [options]
 | `--port` | `8000` | Port to bind |
 | `--reload` | - | Enable auto-reload for development |
 
+## Document Chunking
+
+Documents are split into chunks before indexing:
+
+| Format | Method | Details |
+|--------|--------|---------|
+| Markdown | Header-based splitting | Splits on H1/H2/H3 headers |
+| PDF/DOCX | Recursive character splitting | 1000 chars, 200 overlap |
+
+This follows industry-standard practices for RAG applications. For detailed documentation on the chunking strategy, alternatives, and configuration options, see [docs/chunking-strategy.md](docs/chunking-strategy.md).
+
 ## Python API
 
 ### Search Documents
@@ -407,7 +418,8 @@ print(response.content)
 │       ├── app.js               # Search frontend
 │       ├── chat.js              # Chat frontend
 │       └── styles.css           # Styling
-├── docs/                        # Uploaded documents directory
+├── docs/                        # Documentation & uploaded documents
+│   └── chunking-strategy.md     # Document chunking approach
 ├── tests/                       # Test files
 ├── docker-compose.yaml          # Elasticsearch & Kibana
 ├── load-markdown-into-es.py     # CLI for document ingestion
