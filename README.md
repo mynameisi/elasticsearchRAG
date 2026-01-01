@@ -171,29 +171,77 @@ uv sync --extra dev
 
 ### Step 3: Configure Environment Variables
 
-Create a `.env` file in the project root:
+Copy the example environment file and fill in your API keys:
 
 ```bash
-# Required for embeddings (Volcengine Ark)
+cp .env.example .env
+```
+
+Then edit `.env` with your actual values. The file contains detailed comments explaining each variable:
+
+```bash
+# =============================================================================
+# RAG Application Environment Variables
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# VOLCENGINE ARK - Text Embeddings (Required for semantic search)
+# -----------------------------------------------------------------------------
+# These credentials generate vector embeddings for documents and search queries,
+# enabling semantic/similarity search in Elasticsearch.
+#
+# ARK_API_KEY: Your Volcengine Ark API key for authentication
+# Example: ark-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ARK_API_KEY=your-volcengine-ark-api-key
+
+# ARK_EMBEDDING_ENDPOINT: The inference endpoint ID for the embedding model.
+# This is passed as the "model" parameter in API requests to specify which
+# deployed embedding model to use.
+# Format: ep-YYYYMMDDHHMMSS-xxxxx (e.g., ep-20251228171132-pgkpt)
 ARK_EMBEDDING_ENDPOINT=ep-xxxxxxxxx-xxxxx
 
-# Required for AI chat (Alibaba DashScope)
+# -----------------------------------------------------------------------------
+# ALIBABA DASHSCOPE - Qwen LLM Chat (Required for AI chat feature)
+# -----------------------------------------------------------------------------
+# This API key powers the Qwen large language model that generates
+# conversational responses. It takes retrieved document context and
+# produces human-readable answers.
+#
+# DASHSCOPE_API_KEY: Your Alibaba DashScope API key for Qwen LLM
+# Example: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 DASHSCOPE_API_KEY=your-dashscope-api-key
 ```
 
 #### Getting API Keys
 
-| Service | Purpose | Console |
-|---------|---------|---------|
-| **Volcengine Ark** | Text embeddings (Doubao model) | [console.volcengine.com/ark](https://console.volcengine.com/ark) |
-| **DashScope** | Qwen LLM for chat | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| Variable | Service | Purpose | How It's Used |
+|----------|---------|---------|---------------|
+| `ARK_API_KEY` | Volcengine Ark | Authentication | Bearer token in API requests |
+| `ARK_EMBEDDING_ENDPOINT` | Volcengine Ark | Model selection | Passed as `model` parameter to specify which embedding model to use |
+| `DASHSCOPE_API_KEY` | Alibaba DashScope | Authentication | API key for Qwen LLM chat requests |
 
-**Volcengine Ark Setup:**
-1. Create an API Key in the console
-2. Go to **模型推理** → **推理接入点管理**
-3. Create an embedding endpoint (e.g., `doubao-embedding`)
-4. Copy the endpoint ID (format: `ep-xxxxxxxxx-xxxxx`)
+#### Volcengine Ark Setup (for Embeddings)
+
+Console: [console.volcengine.com/ark](https://console.volcengine.com/ark)
+
+1. **Create an API Key:**
+   - Go to **API Key 管理** in the left sidebar
+   - Click **创建 API Key**
+   - Copy the generated key (you won't be able to see it again!)
+
+2. **Create an Embedding Endpoint:**
+   - Go to **模型推理** → **推理接入点管理**
+   - Click **创建推理接入点**
+   - Select an embedding model (e.g., `doubao-embedding` or `doubao-embedding-large`)
+   - After creation, copy the endpoint ID (format: `ep-YYYYMMDDHHMMSS-xxxxx`)
+
+#### Alibaba DashScope Setup (for Chat)
+
+Console: [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com)
+
+1. Go to **API-KEY 管理** in the left sidebar
+2. Click **创建新的 API-KEY**
+3. Copy the generated key
 
 ### Step 4: Index Documents
 
@@ -430,12 +478,12 @@ print(response.content)
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ARK_API_KEY` | For embeddings | Volcengine Ark API key |
-| `ARK_EMBEDDING_ENDPOINT` | For embeddings | Embedding model endpoint ID |
-| `DASHSCOPE_API_KEY` | For chat | Alibaba DashScope API key |
-| `ARK_BASE_URL` | No | Custom Ark API URL (default: Beijing) |
+| Variable | Required For | Description | Example |
+|----------|--------------|-------------|---------|
+| `ARK_API_KEY` | Embeddings | Volcengine Ark API key for authentication | `ark-xxxxxxxxxxxx` |
+| `ARK_EMBEDDING_ENDPOINT` | Embeddings | Inference endpoint ID specifying which embedding model to use (passed as `model` parameter in API) | `ep-20251228171132-pgkpt` |
+| `DASHSCOPE_API_KEY` | Chat | Alibaba DashScope API key for Qwen LLM | `sk-xxxxxxxxxxxx` |
+| `ARK_BASE_URL` | Optional | Custom Volcengine Ark API base URL | Default: `https://ark.cn-beijing.volces.com/api/v3` |
 
 ## Troubleshooting
 
