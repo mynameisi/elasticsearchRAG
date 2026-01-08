@@ -51,3 +51,6 @@ elasticsearch-data/
 .env
 .env.local
 .env.*.local
+
+# Documentation
+docs/
